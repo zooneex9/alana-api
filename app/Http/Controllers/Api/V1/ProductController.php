@@ -7,7 +7,10 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Models\Product;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProductController extends Controller
 {
@@ -34,9 +37,16 @@ class ProductController extends Controller
         $payload = $request->validated();
 
         if ($request->hasFile('image')) {
-            $path = $request->file('image')->store('products', 's3');
-            $payload['image_path'] = $path;
-            $payload['image_url'] = Storage::disk('s3')->url($path);
+            try {
+                $payload = [
+                    ...$payload,
+                    ...$this->uploadImageToS3($request->file('image')),
+                ];
+            } catch (Throwable) {
+                return response()->json([
+                    'message' => 'Image upload failed. Verify S3 credentials, bucket, region, and PutObject permissions.',
+                ], 422);
+            }
         }
 
         $product = Product::query()->create($payload);
@@ -54,13 +64,23 @@ class ProductController extends Controller
         $payload = $request->validated();
 
         if ($request->hasFile('image')) {
+            try {
+                $uploadedImage = $this->uploadImageToS3($request->file('image'));
+            } catch (Throwable) {
+                return response()->json([
+                    'message' => 'Image upload failed. Verify S3 credentials, bucket, region, and PutObject permissions.',
+                ], 422);
+            }
+
+            // Only delete previous object after the new upload succeeded.
             if ($product->image_path) {
                 Storage::disk('s3')->delete($product->image_path);
             }
 
-            $path = $request->file('image')->store('products', 's3');
-            $payload['image_path'] = $path;
-            $payload['image_url'] = Storage::disk('s3')->url($path);
+            $payload = [
+                ...$payload,
+                ...$uploadedImage,
+            ];
         }
 
         $product->update($payload);
@@ -88,5 +108,50 @@ class ProductController extends Controller
         $product->update(['status' => $validated['status']]);
 
         return response()->json($product->fresh());
+    }
+
+    /**
+     * @return array{image_path: string, image_url: string}
+     */
+    private function uploadImageToS3(UploadedFile $image): array
+    {
+        try {
+            $path = $image->store('products', 's3');
+        } catch (Throwable $exception) {
+            Log::error('S3 upload threw an exception.', [
+                'disk' => 's3',
+                'bucket' => config('filesystems.disks.s3.bucket'),
+                'region' => config('filesystems.disks.s3.region'),
+                'endpoint' => config('filesystems.disks.s3.endpoint'),
+                'aws_url' => config('filesystems.disks.s3.url'),
+                'original_name' => $image->getClientOriginalName(),
+                'mime_type' => $image->getClientMimeType(),
+                'size' => $image->getSize(),
+                'exception_class' => $exception::class,
+                'exception_message' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
+
+        if (! is_string($path) || $path === '') {
+            Log::error('S3 upload returned empty path.', [
+                'disk' => 's3',
+                'bucket' => config('filesystems.disks.s3.bucket'),
+                'region' => config('filesystems.disks.s3.region'),
+                'endpoint' => config('filesystems.disks.s3.endpoint'),
+                'aws_url' => config('filesystems.disks.s3.url'),
+                'original_name' => $image->getClientOriginalName(),
+                'mime_type' => $image->getClientMimeType(),
+                'size' => $image->getSize(),
+            ]);
+
+            throw new \RuntimeException('S3 upload returned an invalid path.');
+        }
+
+        return [
+            'image_path' => $path,
+            'image_url' => Storage::disk('s3')->url($path),
+        ];
     }
 }
