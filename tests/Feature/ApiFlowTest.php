@@ -59,11 +59,17 @@ class ApiFlowTest extends TestCase
                 'name' => 'MacBook Air M4',
                 'description' => '16GB RAM, 512GB SSD',
                 'price' => 29999,
+                'quantity' => 2,
                 'status' => 'available',
-                'payment_type' => 'installment',
-                'down_payment' => 9000,
-                'installments' => 4,
+                'payment_plans' => [
+                    [
+                        'type' => 'installment',
+                        'down_payment' => 9000,
+                        'installments' => 4,
+                    ],
+                ],
                 'category' => 'Electronics',
+                'item_condition' => 'new',
                 'date_added' => now()->toDateString(),
             ]);
 
@@ -80,8 +86,11 @@ class ApiFlowTest extends TestCase
     {
         $product = Product::factory()->create([
             'status' => 'available',
-            'payment_type' => 'full',
             'price' => 5000,
+            'quantity' => 1,
+            'payment_plans' => [
+                ['type' => 'full'],
+            ],
         ]);
 
         $checkout = $this->postJson('/api/v1/orders/checkout-session', [
@@ -138,6 +147,7 @@ class ApiFlowTest extends TestCase
         $this->assertDatabaseHas('products', [
             'id' => $product->id,
             'status' => 'sold',
+            'quantity' => 0,
         ]);
     }
 

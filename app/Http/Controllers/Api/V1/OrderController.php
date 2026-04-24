@@ -27,7 +27,14 @@ class OrderController extends Controller
     public function store(StoreOrderRequest $request)
     {
         $order = Order::query()->create($request->validated());
-        $order->product()->update(['status' => 'sold']);
+        $product = $order->product;
+        if ($product) {
+            $product->decrement('quantity', 1);
+            $product->refresh();
+            $product->update($product->quantity < 1
+                ? ['status' => 'sold', 'quantity' => 0]
+                : ['status' => 'available']);
+        }
 
         return response()->json($order->load('product'), 201);
     }
@@ -61,20 +68,36 @@ class OrderController extends Controller
         $validated = $request->validated();
         $product = Product::query()->findOrFail($validated['product_id']);
 
-        if ($product->status === 'sold') {
+        if (in_array($product->status, ['sold', 'separated'], true)) {
             return response()->json([
-                'message' => 'This product is already sold.',
+                'message' => 'Este producto no está disponible para compra en línea.',
+            ], 422);
+        }
+
+        if ((int) $product->quantity < 1) {
+            return response()->json([
+                'message' => 'Sin stock.',
             ], 422);
         }
 
         $mode = $validated['mode'];
-        $chargeAmount = $mode === 'separate' && $product->payment_type === 'installment'
-            ? (float) ($product->down_payment ?? 0)
-            : (float) $product->price;
+        $plans = $product->paymentPlansList();
+        $idx = (int) ($validated['payment_plan_index'] ?? 0);
+
+        if ($mode === 'separate') {
+            if (! isset($plans[$idx]) || ($plans[$idx]['type'] ?? '') !== 'installment') {
+                return response()->json([
+                    'message' => 'Elige un plan a meses válido (enganche) para apartar.',
+                ], 422);
+            }
+            $chargeAmount = (float) ($plans[$idx]['down_payment'] ?? 0);
+        } else {
+            $chargeAmount = (float) $product->price;
+        }
 
         if ($chargeAmount <= 0) {
             return response()->json([
-                'message' => 'Invalid charge amount.',
+                'message' => 'Monto a cobrar inválido.',
             ], 422);
         }
 
@@ -88,7 +111,10 @@ class OrderController extends Controller
             'payment_method' => 'stripe',
             'status' => 'pending',
             'order_date' => now()->toDateString(),
-            'meta' => ['mode' => $mode],
+            'meta' => [
+                'mode' => $mode,
+                'payment_plan_index' => $idx,
+            ],
         ]);
 
         if ($mode === 'separate' && $product->status === 'available') {
@@ -132,6 +158,7 @@ class OrderController extends Controller
                     'order_id' => (string) $order->id,
                     'product_id' => (string) $product->id,
                     'mode' => $mode,
+                    'payment_plan_index' => (string) $idx,
                 ],
                 'success_url' => rtrim(config('app.frontend_url'), '/').'/checkout/success?session_id={CHECKOUT_SESSION_ID}',
                 'cancel_url' => rtrim(config('app.frontend_url'), '/').'/checkout/cancel?order_id='.$order->id,

@@ -25,6 +25,8 @@ class CreateCheckoutSessionRequest extends FormRequest
         return [
             'product_id' => ['required', 'integer', 'exists:products,id'],
             'mode' => ['required', 'in:buy,separate'],
+            /** Índice en product.payment_plans (0-based); obligatorio con varios planes a meses */
+            'payment_plan_index' => ['nullable', 'integer', 'min:0'],
             'buyer_name' => ['required', 'string', 'max:120'],
             'buyer_email' => ['required', 'email'],
             'buyer_phone' => ['required', 'string', 'max:40'],

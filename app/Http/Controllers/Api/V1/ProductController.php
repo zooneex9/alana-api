@@ -8,8 +8,9 @@ use App\Http\Requests\UpdateProductRequest;
 use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class ProductController extends Controller
@@ -34,22 +35,29 @@ class ProductController extends Controller
 
     public function store(StoreProductRequest $request)
     {
-        $payload = $request->validated();
+        $payload = Arr::except($request->validated(), ['images', 'image_urls']);
 
-        if ($request->hasFile('image')) {
-            try {
-                $payload = [
-                    ...$payload,
-                    ...$this->uploadImageToS3($request->file('image')),
-                ];
-            } catch (Throwable) {
-                return response()->json([
-                    'message' => 'Image upload failed. Verify S3 credentials, bucket, region, and PutObject permissions.',
-                ], 422);
-            }
+        try {
+            $images = $this->collectUploadedImages($request);
+        } catch (Throwable) {
+            return response()->json([
+                'message' => 'Image upload failed. Verify S3 credentials, bucket, region, and PutObject permissions.',
+            ], 422);
         }
+        $images = array_merge($images, $this->collectImageUrlsFromRequest($request));
 
-        $product = Product::query()->create($payload);
+        $payload['images'] = $images;
+
+        try {
+            $product = Product::query()->create($payload);
+        } catch (Throwable) {
+            foreach ($images as $img) {
+                if (! empty($img['path'])) {
+                    Storage::disk('s3')->delete($img['path']);
+                }
+            }
+            throw new \RuntimeException('Product create failed.');
+        }
 
         return response()->json($product, 201);
     }
@@ -61,37 +69,78 @@ class ProductController extends Controller
 
     public function update(UpdateProductRequest $request, Product $product)
     {
-        $payload = $request->validated();
+        $payload = Arr::except($request->validated(), [
+            'images',
+            'remove_image_paths',
+            'remove_image_urls',
+            'image_urls',
+        ]);
 
-        if ($request->hasFile('image')) {
-            try {
-                $uploadedImage = $this->uploadImageToS3($request->file('image'));
-            } catch (Throwable) {
-                return response()->json([
-                    'message' => 'Image upload failed. Verify S3 credentials, bucket, region, and PutObject permissions.',
-                ], 422);
+        $current = $product->imagesList();
+        $pathsToDelete = [];
+
+        $removePaths = $this->decodeJsonList($request->input('remove_image_paths'));
+        $removeUrls = $this->decodeJsonList($request->input('remove_image_urls'));
+
+        $filtered = [];
+        foreach ($current as $img) {
+            if (! is_array($img)) {
+                continue;
             }
+            $p = $img['path'] ?? null;
+            $u = $img['url'] ?? null;
+            if ($p && in_array($p, $removePaths, true)) {
+                $pathsToDelete[] = $p;
 
-            // Only delete previous object after the new upload succeeded.
-            if ($product->image_path) {
-                Storage::disk('s3')->delete($product->image_path);
+                continue;
             }
-
-            $payload = [
-                ...$payload,
-                ...$uploadedImage,
-            ];
+            if ((! $p || $p === '') && $u && in_array($u, $removeUrls, true)) {
+                continue;
+            }
+            $filtered[] = $img;
         }
 
-        $product->update($payload);
+        foreach (array_unique($pathsToDelete) as $path) {
+            if ($path) {
+                Storage::disk('s3')->delete($path);
+            }
+        }
+
+        $merged = $filtered;
+        try {
+            $newUploads = $this->collectUploadedImages($request);
+        } catch (Throwable) {
+            return response()->json([
+                'message' => 'Image upload failed. Verify S3 credentials, bucket, region, and PutObject permissions.',
+            ], 422);
+        }
+        foreach ($newUploads as $row) {
+            $merged[] = $row;
+        }
+        foreach ($this->collectImageUrlsFromRequest($request) as $row) {
+            $merged[] = $row;
+        }
+
+        try {
+            $product->update(array_merge($payload, ['images' => $merged]));
+        } catch (Throwable) {
+            foreach ($newUploads as $img) {
+                if (! empty($img['path'])) {
+                    Storage::disk('s3')->delete($img['path']);
+                }
+            }
+            throw new \RuntimeException('Product update failed.');
+        }
 
         return response()->json($product->fresh());
     }
 
     public function destroy(Product $product)
     {
-        if ($product->image_path) {
-            Storage::disk('s3')->delete($product->image_path);
+        foreach ($product->imagesList() as $img) {
+            if (is_array($img) && ! empty($img['path'])) {
+                Storage::disk('s3')->delete($img['path']);
+            }
         }
 
         $product->delete();
@@ -111,7 +160,85 @@ class ProductController extends Controller
     }
 
     /**
-     * @return array{image_path: string, image_url: string}
+     * @return array<int, array{path: ?string, url: string}>
+     */
+    private function collectUploadedImages(Request $request): array
+    {
+        if (! $request->hasFile('images')) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($request->file('images', []) as $file) {
+            if ($file instanceof UploadedFile && $file->isValid()) {
+                try {
+                    $out[] = $this->uploadImageToS3($file);
+                } catch (Throwable $e) {
+                    foreach ($out as $img) {
+                        if (! empty($img['path'])) {
+                            Storage::disk('s3')->delete($img['path']);
+                        }
+                    }
+
+                    throw $e;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<int, array{path: null, url: string}>
+     */
+    private function collectImageUrlsFromRequest(Request $request): array
+    {
+        $raw = $request->input('image_urls');
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        $urls = is_string($raw) ? json_decode($raw, true) : $raw;
+        if (! is_array($urls)) {
+            return [];
+        }
+        $out = [];
+        foreach ($urls as $url) {
+            if (is_string($url) && filter_var($url, FILTER_VALIDATE_URL)) {
+                $out[] = ['path' => null, 'url' => $url];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function decodeJsonList(mixed $raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        if (is_array($raw)) {
+            $list = $raw;
+        } else {
+            $list = json_decode((string) $raw, true);
+        }
+        if (! is_array($list)) {
+            return [];
+        }
+        $out = [];
+        foreach ($list as $v) {
+            if (is_string($v) && $v !== '') {
+                $out[] = $v;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array{path: string, url: string}
      */
     private function uploadImageToS3(UploadedFile $image): array
     {
@@ -150,8 +277,8 @@ class ProductController extends Controller
         }
 
         return [
-            'image_path' => $path,
-            'image_url' => Storage::disk('s3')->url($path),
+            'path' => $path,
+            'url' => Storage::disk('s3')->url($path),
         ];
     }
 }

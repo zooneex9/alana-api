@@ -46,7 +46,15 @@ class StripeWebhookController extends Controller
                     'stripe_payment_intent_id' => $session->payment_intent ?? null,
                     'paid_at' => Carbon::now(),
                 ]);
-                $order->product()->update(['status' => 'sold']);
+                $product = $order->product;
+                if ($product) {
+                    $product->decrement('quantity', 1);
+                    $product->refresh();
+                    $attributes = $product->quantity < 1
+                        ? ['status' => 'sold', 'quantity' => 0]
+                        : ['status' => 'available'];
+                    $product->update($attributes);
+                }
             }
         }
 

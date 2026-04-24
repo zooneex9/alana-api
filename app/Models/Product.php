@@ -14,25 +14,60 @@ class Product extends Model
         'name',
         'description',
         'price',
+        'quantity',
         'status',
-        'payment_type',
-        'down_payment',
-        'installments',
+        'payment_plans',
         'category',
+        'item_condition',
         'date_added',
-        'image_path',
-        'image_url',
+        'images',
     ];
 
     protected $casts = [
         'price' => 'float',
-        'down_payment' => 'float',
-        'installments' => 'integer',
+        'quantity' => 'integer',
         'date_added' => 'date',
+        'payment_plans' => 'array',
+        'images' => 'array',
     ];
+
+    protected $appends = [
+        'image_url',
+    ];
+
+    /**
+     * @return array<int, array{path: ?string, url: ?string}>
+     */
+    public function imagesList(): array
+    {
+        $i = $this->images;
+
+        return is_array($i) ? $i : [];
+    }
+
+    public function getImageUrlAttribute(): ?string
+    {
+        $list = $this->imagesList();
+        if ($list === []) {
+            return null;
+        }
+        $first = $list[0];
+
+        return is_array($first) ? ($first['url'] ?? null) : null;
+    }
 
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class);
+    }
+
+    /**
+     * @return array<int, array{type: string, down_payment?: float, installments?: int}>
+     */
+    public function paymentPlansList(): array
+    {
+        $p = $this->payment_plans;
+
+        return is_array($p) ? $p : [];
     }
 }
