@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -68,6 +69,32 @@ class Product extends Model
     {
         $p = $this->payment_plans;
 
-        return is_array($p) ? $p : [];
+        if (! is_array($p)) {
+            return [];
+        }
+
+        return array_map(function ($plan) {
+            if (! is_array($plan) || ($plan['type'] ?? '') !== 'installment') {
+                return ['type' => 'full'];
+            }
+            $periods = (int) ($plan['periods'] ?? $plan['installments'] ?? 1);
+
+            return [
+                'type' => 'installment',
+                'down_payment' => (float) ($plan['down_payment'] ?? 0),
+                'periods' => max(1, $periods),
+                'frequency' => ($plan['frequency'] ?? 'monthly') === 'weekly' ? 'weekly' : 'monthly',
+                // compatibilidad legacy
+                'installments' => max(1, $periods),
+            ];
+        }, $p);
+    }
+
+    /**
+     * En JSON, fechas sin hora (evita "2026-04-24T00:00:00.000000Z" en el cliente).
+     */
+    protected function serializeDate(DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d');
     }
 }

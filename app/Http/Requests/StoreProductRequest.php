@@ -39,8 +39,8 @@ class StoreProductRequest extends FormRequest
                 }
                 $type = $plan['type'] ?? '';
                 if ($type === 'installment') {
-                    if (! array_key_exists('down_payment', $plan) || ! array_key_exists('installments', $plan)) {
-                        $v->errors()->add("payment_plans.{$i}", 'Plan a meses: indica enganche y número de pagos.');
+                    if (! array_key_exists('down_payment', $plan) || ! array_key_exists('periods', $plan) || ! array_key_exists('frequency', $plan)) {
+                        $v->errors()->add("payment_plans.{$i}", 'Plan a plazos: indica enganche, frecuencia y número de periodos.');
 
                         return;
                     }
@@ -64,6 +64,8 @@ class StoreProductRequest extends FormRequest
             'payment_plans.*.type' => ['required', 'in:full,installment'],
             'payment_plans.*.down_payment' => ['nullable', 'numeric', 'min:0'],
             'payment_plans.*.installments' => ['nullable', 'integer', 'min:1', 'max:24'],
+            'payment_plans.*.periods' => ['nullable', 'integer', 'min:1', 'max:52'],
+            'payment_plans.*.frequency' => ['nullable', 'in:weekly,monthly'],
             'category' => ['required', 'string', 'max:120'],
             'item_condition' => ['required', 'in:new,used_like_new,used_good'],
             'date_added' => ['nullable', 'date'],

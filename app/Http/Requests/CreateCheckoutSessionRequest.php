@@ -31,6 +31,7 @@ class CreateCheckoutSessionRequest extends FormRequest
             'buyer_email' => ['required', 'email'],
             'buyer_phone' => ['required', 'string', 'max:40'],
             'buyer_address' => ['required', 'string', 'max:500'],
+            'requires_invoice' => ['sometimes', 'boolean'],
         ];
     }
 }

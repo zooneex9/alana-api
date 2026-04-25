@@ -65,7 +65,8 @@ class ApiFlowTest extends TestCase
                     [
                         'type' => 'installment',
                         'down_payment' => 9000,
-                        'installments' => 4,
+                        'periods' => 4,
+                        'frequency' => 'monthly',
                     ],
                 ],
                 'category' => 'Electronics',
@@ -186,5 +187,33 @@ class ApiFlowTest extends TestCase
             'id' => $product->id,
             'status' => 'available',
         ]);
+    }
+
+    public function test_checkout_session_applies_invoice_vat_to_buy_mode(): void
+    {
+        $product = Product::factory()->create([
+            'status' => 'available',
+            'price' => 1000,
+            'quantity' => 1,
+            'payment_plans' => [
+                ['type' => 'full'],
+            ],
+        ]);
+
+        $checkout = $this->postJson('/api/v1/orders/checkout-session', [
+            'product_id' => $product->id,
+            'mode' => 'buy',
+            'requires_invoice' => true,
+            'buyer_name' => 'Jane Doe',
+            'buyer_email' => 'jane@example.com',
+            'buyer_phone' => '+525511112222',
+            'buyer_address' => 'CDMX',
+        ]);
+
+        $checkout->assertCreated()
+            ->assertJsonPath('order.amount', 1160)
+            ->assertJsonPath('order.meta.requires_invoice', true)
+            ->assertJsonPath('order.meta.pricing.vat_amount', 160)
+            ->assertJsonPath('order.meta.pricing.total', 1160);
     }
 }

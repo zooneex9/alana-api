@@ -14,6 +14,77 @@ use Stripe\StripeClient;
 
 class OrderController extends Controller
 {
+    private const VAT_RATE = 0.16;
+
+    private function surchargePctByPeriods(int $periods): float
+    {
+        if ($periods < 3) {
+            return 0.0;
+        }
+
+        return 10.0 + (float) (intdiv($periods - 3, 3) * 3);
+    }
+
+    /**
+     * @return array{
+     *  base: float,
+     *  down_payment: float,
+     *  remaining: float,
+     *  periods: int,
+     *  frequency: string,
+     *  surcharge_pct: float,
+     *  surcharge_amount: float,
+     *  subtotal_before_vat: float,
+     *  vat_amount: float,
+     *  total: float,
+     *  charge_now: float
+     * }
+     */
+    private function checkoutAmounts(Product $product, string $mode, array $plans, int $idx, bool $requiresInvoice): array
+    {
+        $base = (float) $product->price;
+        $downPayment = 0.0;
+        $remaining = $base;
+        $periods = 1;
+        $frequency = 'monthly';
+        $surchargePct = 0.0;
+        $surchargeAmount = 0.0;
+        $subtotalBeforeVat = $base;
+        $chargeNow = $base;
+
+        if ($mode === 'separate') {
+            $plan = $plans[$idx];
+            $downPayment = max(0.0, (float) ($plan['down_payment'] ?? 0));
+            $periods = max(1, (int) ($plan['periods'] ?? $plan['installments'] ?? 1));
+            $frequency = (($plan['frequency'] ?? 'monthly') === 'weekly') ? 'weekly' : 'monthly';
+            $remaining = max(0.0, $base - $downPayment);
+            $surchargePct = $this->surchargePctByPeriods($periods);
+            $surchargeAmount = $remaining * ($surchargePct / 100);
+            $subtotalBeforeVat = $downPayment + $remaining + $surchargeAmount;
+            $chargeNow = $downPayment;
+        }
+
+        $vatAmount = $requiresInvoice ? ($subtotalBeforeVat * self::VAT_RATE) : 0.0;
+        $total = $subtotalBeforeVat + $vatAmount;
+        if ($mode === 'buy' && $requiresInvoice) {
+            $chargeNow = $total;
+        }
+
+        return [
+            'base' => round($base, 2),
+            'down_payment' => round($downPayment, 2),
+            'remaining' => round($remaining, 2),
+            'periods' => $periods,
+            'frequency' => $frequency,
+            'surcharge_pct' => round($surchargePct, 2),
+            'surcharge_amount' => round($surchargeAmount, 2),
+            'subtotal_before_vat' => round($subtotalBeforeVat, 2),
+            'vat_amount' => round($vatAmount, 2),
+            'total' => round($total, 2),
+            'charge_now' => round($chargeNow, 2),
+        ];
+    }
+
     public function index()
     {
         $orders = Order::query()
@@ -83,17 +154,18 @@ class OrderController extends Controller
         $mode = $validated['mode'];
         $plans = $product->paymentPlansList();
         $idx = (int) ($validated['payment_plan_index'] ?? 0);
+        $requiresInvoice = (bool) ($validated['requires_invoice'] ?? false);
 
         if ($mode === 'separate') {
             if (! isset($plans[$idx]) || ($plans[$idx]['type'] ?? '') !== 'installment') {
                 return response()->json([
-                    'message' => 'Elige un plan a meses válido (enganche) para apartar.',
+                    'message' => 'Elige un plan a plazos válido (enganche + periodos) para apartar.',
                 ], 422);
             }
-            $chargeAmount = (float) ($plans[$idx]['down_payment'] ?? 0);
-        } else {
-            $chargeAmount = (float) $product->price;
         }
+
+        $breakdown = $this->checkoutAmounts($product, $mode, $plans, $idx, $requiresInvoice);
+        $chargeAmount = (float) $breakdown['charge_now'];
 
         if ($chargeAmount <= 0) {
             return response()->json([
@@ -114,6 +186,8 @@ class OrderController extends Controller
             'meta' => [
                 'mode' => $mode,
                 'payment_plan_index' => $idx,
+                'requires_invoice' => $requiresInvoice,
+                'pricing' => $breakdown,
             ],
         ]);
 
@@ -159,6 +233,7 @@ class OrderController extends Controller
                     'product_id' => (string) $product->id,
                     'mode' => $mode,
                     'payment_plan_index' => (string) $idx,
+                    'requires_invoice' => $requiresInvoice ? '1' : '0',
                 ],
                 'success_url' => rtrim(config('app.frontend_url'), '/').'/checkout/success?session_id={CHECKOUT_SESSION_ID}',
                 'cancel_url' => rtrim(config('app.frontend_url'), '/').'/checkout/cancel?order_id='.$order->id,
