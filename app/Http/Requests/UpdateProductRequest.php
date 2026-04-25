@@ -22,6 +22,12 @@ class UpdateProductRequest extends FormRequest
         if ($this->has('quantity') && is_string($this->input('quantity'))) {
             $this->merge(['quantity' => (int) $this->input('quantity')]);
         }
+        if ($this->has('shipping_to_agree')) {
+            $v = $this->input('shipping_to_agree');
+            if (is_string($v)) {
+                $this->merge(['shipping_to_agree' => filter_var($v, FILTER_VALIDATE_BOOLEAN)]);
+            }
+        }
     }
 
     public function withValidator(Validator $validator): void
@@ -70,6 +76,7 @@ class UpdateProductRequest extends FormRequest
             'payment_plans.*.frequency' => ['nullable', 'in:weekly,monthly'],
             'category' => ['sometimes', 'string', 'max:120'],
             'item_condition' => ['sometimes', 'in:new,used_like_new,used_good'],
+            'shipping_to_agree' => ['sometimes', 'boolean'],
             'date_added' => ['sometimes', 'date'],
             'images' => ['nullable', 'array', 'max:20'],
             'images.*' => ['file', 'image', 'max:5120'],

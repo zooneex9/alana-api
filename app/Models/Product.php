@@ -20,11 +20,13 @@ class Product extends Model
         'payment_plans',
         'category',
         'item_condition',
+        'shipping_to_agree',
         'date_added',
         'images',
     ];
 
     protected $casts = [
+        'shipping_to_agree' => 'boolean',
         'price' => 'float',
         'quantity' => 'integer',
         'date_added' => 'date',

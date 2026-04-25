@@ -3,11 +3,17 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AssignOrderCustomerRequest;
+use App\Http\Requests\CreateInstallmentCheckoutSessionRequest;
+use App\Http\Requests\CreateShippingCheckoutSessionRequest;
 use App\Http\Requests\CreateCheckoutSessionRequest;
 use App\Http\Requests\StoreOrderRequest;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Stripe\Checkout\Session;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
@@ -37,7 +43,8 @@ class OrderController extends Controller
      *  subtotal_before_vat: float,
      *  vat_amount: float,
      *  total: float,
-     *  charge_now: float
+     *  charge_now: float,
+     *  per_period_amount: float
      * }
      */
     private function checkoutAmounts(Product $product, string $mode, array $plans, int $idx, bool $requiresInvoice): array
@@ -51,6 +58,7 @@ class OrderController extends Controller
         $surchargeAmount = 0.0;
         $subtotalBeforeVat = $base;
         $chargeNow = $base;
+        $perPeriodAmount = 0.0;
 
         if ($mode === 'separate') {
             $plan = $plans[$idx];
@@ -69,6 +77,9 @@ class OrderController extends Controller
         if ($mode === 'buy' && $requiresInvoice) {
             $chargeNow = $total;
         }
+        if ($mode === 'separate') {
+            $perPeriodAmount = $periods > 0 ? (($total - $downPayment) / $periods) : 0.0;
+        }
 
         return [
             'base' => round($base, 2),
@@ -82,13 +93,14 @@ class OrderController extends Controller
             'vat_amount' => round($vatAmount, 2),
             'total' => round($total, 2),
             'charge_now' => round($chargeNow, 2),
+            'per_period_amount' => round($perPeriodAmount, 2),
         ];
     }
 
     public function index()
     {
         $orders = Order::query()
-            ->with('product')
+            ->with(['product', 'user'])
             ->latest()
             ->paginate(25);
 
@@ -107,12 +119,12 @@ class OrderController extends Controller
                 : ['status' => 'available']);
         }
 
-        return response()->json($order->load('product'), 201);
+        return response()->json($order->load(['product', 'user']), 201);
     }
 
     public function show(Order $order)
     {
-        return response()->json($order->load('product'));
+        return response()->json($order->load(['product', 'user']));
     }
 
     public function update(Request $request, Order $order)
@@ -131,7 +143,7 @@ class OrderController extends Controller
             $order->product()->update(['status' => 'sold']);
         }
 
-        return response()->json($order->fresh()->load('product'));
+        return response()->json($order->fresh()->load(['product', 'user']));
     }
 
     public function createCheckoutSession(CreateCheckoutSessionRequest $request)
@@ -187,6 +199,7 @@ class OrderController extends Controller
                 'mode' => $mode,
                 'payment_plan_index' => $idx,
                 'requires_invoice' => $requiresInvoice,
+                'shipping_to_agree' => (bool) $product->shipping_to_agree,
                 'pricing' => $breakdown,
             ],
         ]);
@@ -230,6 +243,7 @@ class OrderController extends Controller
                 ]],
                 'metadata' => [
                     'order_id' => (string) $order->id,
+                    'checkout_kind' => 'initial',
                     'product_id' => (string) $product->id,
                     'mode' => $mode,
                     'payment_plan_index' => (string) $idx,
@@ -254,8 +268,230 @@ class OrderController extends Controller
 
         return response()->json([
             'checkout_url' => $session->url,
-            'order' => $order->fresh()->load('product'),
+            'order' => $order->fresh()->load(['product', 'user']),
         ], 201);
+    }
+
+    public function createInstallmentCheckoutSession(CreateInstallmentCheckoutSessionRequest $request, Order $order)
+    {
+        $pricing = $order->meta['pricing'] ?? [];
+        $mode = $order->meta['mode'] ?? null;
+        $totalPeriods = (int) ($pricing['periods'] ?? 0);
+        $period = (int) $request->validated('period');
+
+        if ($mode !== 'separate') {
+            return response()->json([
+                'message' => 'Solo los apartados pueden generar cobros por periodo.',
+            ], 422);
+        }
+        if ($period < 1 || $period > $totalPeriods) {
+            return response()->json([
+                'message' => 'Periodo fuera de rango para este apartado.',
+            ], 422);
+        }
+
+        $amount = (float) ($pricing['per_period_amount'] ?? 0);
+        if ($amount <= 0) {
+            return response()->json([
+                'message' => 'No se pudo calcular el monto del periodo.',
+            ], 422);
+        }
+
+        $meta = $order->meta ?? [];
+        $installmentSessions = $meta['installment_sessions'] ?? [];
+        if (! is_array($installmentSessions)) {
+            $installmentSessions = [];
+        }
+
+        if (isset($installmentSessions[(string) $period]['paid_at'])) {
+            return response()->json([
+                'message' => 'Este periodo ya fue pagado.',
+            ], 422);
+        }
+
+        if (app()->environment('testing')) {
+            $sessionId = 'cs_inst_test_'.uniqid();
+            $sessionUrl = rtrim(config('app.frontend_url'), '/')."/checkout/mock?session_id={$sessionId}";
+        } else {
+            try {
+                $stripe = new StripeClient(config('services.stripe.secret'));
+                /** @var Session $session */
+                $session = $stripe->checkout->sessions->create([
+                    'mode' => 'payment',
+                    'customer_email' => $order->buyer_email,
+                    'line_items' => [[
+                        'quantity' => 1,
+                        'price_data' => [
+                            'currency' => 'mxn',
+                            'unit_amount' => (int) round($amount * 100),
+                            'product_data' => [
+                                'name' => 'Pago de periodo '.$period.' - '.$order->product?->name,
+                            ],
+                        ],
+                    ]],
+                    'metadata' => [
+                        'checkout_kind' => 'installment',
+                        'parent_order_id' => (string) $order->id,
+                        'order_id' => (string) $order->id,
+                        'period' => (string) $period,
+                    ],
+                    'success_url' => rtrim(config('app.frontend_url'), '/').'/checkout/success?session_id={CHECKOUT_SESSION_ID}',
+                    'cancel_url' => rtrim(config('app.frontend_url'), '/').'/checkout/cancel?order_id='.$order->id,
+                ]);
+                $sessionId = $session->id;
+                $sessionUrl = $session->url;
+            } catch (ApiErrorException $exception) {
+                return response()->json([
+                    'message' => 'Stripe checkout session creation failed.',
+                    'error' => $exception->getMessage(),
+                ], 500);
+            }
+        }
+
+        $installmentSessions[(string) $period] = [
+            'session_id' => $sessionId,
+            'url' => $sessionUrl,
+            'amount' => round($amount, 2),
+            'status' => 'pending',
+        ];
+        $meta['installment_sessions'] = $installmentSessions;
+        $order->update(['meta' => $meta]);
+
+        return response()->json([
+            'period' => $period,
+            'checkout_url' => $sessionUrl,
+            'order' => $order->fresh()->load(['product', 'user']),
+        ], 201);
+    }
+
+    public function createShippingCheckoutSession(CreateShippingCheckoutSessionRequest $request, Order $order)
+    {
+        $validated = $request->validated();
+        $subtotal = round((float) $validated['amount'], 2);
+        $requiresInvoice = (bool) ($order->meta['requires_invoice'] ?? false);
+        $chargeAmount = $requiresInvoice
+            ? round($subtotal * (1.0 + self::VAT_RATE), 2)
+            : $subtotal;
+
+        if ($chargeAmount <= 0) {
+            return response()->json([
+                'message' => 'Monto a cobrar inválido.',
+            ], 422);
+        }
+
+        $shippingChargeId = (string) Str::uuid();
+        $note = isset($validated['note']) ? (string) $validated['note'] : null;
+
+        $meta = $order->meta ?? [];
+        $shippingCharges = $meta['shipping_charges'] ?? [];
+        if (! is_array($shippingCharges)) {
+            $shippingCharges = [];
+        }
+
+        if (app()->environment('testing')) {
+            $sessionId = 'cs_ship_test_'.uniqid();
+            $sessionUrl = rtrim(config('app.frontend_url'), '/')."/checkout/mock?session_id={$sessionId}";
+        } else {
+            try {
+                $stripe = new StripeClient(config('services.stripe.secret'));
+                /** @var Session $session */
+                $session = $stripe->checkout->sessions->create([
+                    'mode' => 'payment',
+                    'customer_email' => $order->buyer_email,
+                    'line_items' => [[
+                        'quantity' => 1,
+                        'price_data' => [
+                            'currency' => 'mxn',
+                            'unit_amount' => (int) round($chargeAmount * 100),
+                            'product_data' => [
+                                'name' => 'Envío - Orden #'.$order->id,
+                                'description' => $note ?: 'Cargo de envío',
+                            ],
+                        ],
+                    ]],
+                    'metadata' => [
+                        'checkout_kind' => 'shipping',
+                        'parent_order_id' => (string) $order->id,
+                        'order_id' => (string) $order->id,
+                        'shipping_charge_id' => $shippingChargeId,
+                        'amount_subtotal' => (string) $subtotal,
+                        'amount_charged' => (string) $chargeAmount,
+                        'requires_invoice' => $requiresInvoice ? '1' : '0',
+                    ],
+                    'success_url' => rtrim(config('app.frontend_url'), '/').'/checkout/success?session_id={CHECKOUT_SESSION_ID}',
+                    'cancel_url' => rtrim(config('app.frontend_url'), '/').'/checkout/cancel?order_id='.$order->id,
+                ]);
+                $sessionId = $session->id;
+                $sessionUrl = $session->url;
+            } catch (ApiErrorException $exception) {
+                return response()->json([
+                    'message' => 'Stripe checkout session creation failed.',
+                    'error' => $exception->getMessage(),
+                ], 500);
+            }
+        }
+
+        $shippingCharges[$shippingChargeId] = [
+            'amount_subtotal' => $subtotal,
+            'amount_charged' => $chargeAmount,
+            'requires_invoice' => $requiresInvoice,
+            'session_id' => $sessionId,
+            'url' => $sessionUrl,
+            'status' => 'pending',
+            'note' => $note,
+            'created_at' => now()->toIso8601String(),
+        ];
+        $meta['shipping_charges'] = $shippingCharges;
+        $order->update(['meta' => $meta]);
+
+        return response()->json([
+            'shipping_charge_id' => $shippingChargeId,
+            'amount_subtotal' => $subtotal,
+            'amount_charged' => $chargeAmount,
+            'checkout_url' => $sessionUrl,
+            'order' => $order->fresh()->load(['product', 'user']),
+        ], 201);
+    }
+
+    public function assignCustomer(AssignOrderCustomerRequest $request, Order $order)
+    {
+        $validated = $request->validated();
+        $user = User::query()->updateOrCreate(
+            ['email' => $validated['email']],
+            [
+                'name' => $validated['name'],
+                'password' => Hash::make($validated['password']),
+            ]
+        );
+        $user->assignRole('customer');
+
+        $order->update(['user_id' => $user->id]);
+
+        return response()->json([
+            'message' => 'Cliente vinculado correctamente.',
+            'order' => $order->fresh()->load(['product', 'user']),
+        ]);
+    }
+
+    public function customerIndex(Request $request)
+    {
+        $user = $request->user();
+        if (! $user) {
+            return response()->json([
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $orders = Order::query()
+            ->with(['product', 'user'])
+            ->where(function ($query) use ($user): void {
+                $query->where('user_id', $user->id)
+                    ->orWhere('buyer_email', $user->email);
+            })
+            ->latest()
+            ->get();
+
+        return response()->json(['data' => $orders]);
     }
 
     public function refund(Request $request, Order $order)
@@ -318,7 +554,7 @@ class OrderController extends Controller
 
         return response()->json([
             'message' => 'Refund created successfully.',
-            'order' => $order->fresh()->load('product'),
+            'order' => $order->fresh()->load(['product', 'user']),
         ]);
     }
 }

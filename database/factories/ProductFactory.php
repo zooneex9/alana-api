@@ -39,6 +39,7 @@ class ProductFactory extends Factory
                 ],
             'category' => fake()->randomElement(['Electronics', 'Fashion', 'Footwear', 'Accessories', 'Home']),
             'item_condition' => fake()->randomElement(['new', 'used_like_new', 'used_good']),
+            'shipping_to_agree' => false,
             'date_added' => fake()->date(),
             'images' => [
                 ['path' => null, 'url' => fake()->imageUrl(800, 800)],

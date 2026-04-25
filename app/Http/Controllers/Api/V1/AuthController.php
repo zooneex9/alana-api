@@ -41,6 +41,30 @@ class AuthController extends Controller
         ]);
     }
 
+    public function customerLogin(Request $request)
+    {
+        $credentials = $request->validate([
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
+            'device_name' => ['nullable', 'string'],
+        ]);
+
+        $user = User::query()->where('email', $credentials['email'])->first();
+
+        if (! $user || ! Hash::check($credentials['password'], $user->password) || ! $user->hasRole('customer')) {
+            throw ValidationException::withMessages([
+                'email' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        $token = $user->createToken($credentials['device_name'] ?? 'customer-web-client')->plainTextToken;
+
+        return response()->json([
+            'token' => $token,
+            'user' => $user->load('roles'),
+        ]);
+    }
+
     public function logout(Request $request)
     {
         $request->user()?->currentAccessToken()?->delete();

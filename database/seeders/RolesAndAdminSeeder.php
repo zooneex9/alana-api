@@ -15,6 +15,7 @@ class RolesAndAdminSeeder extends Seeder
     {
         $adminRole = Role::findOrCreate('admin');
         $buyerRole = Role::findOrCreate('buyer');
+        $customerRole = Role::findOrCreate('customer');
 
         $admin = User::query()->firstOrCreate(
             ['email' => 'admin@bodega.test'],
@@ -33,6 +34,7 @@ class RolesAndAdminSeeder extends Seeder
             ]
         );
         $buyer->assignRole($buyerRole);
+        $buyer->assignRole($customerRole);
 
         foreach (['Electronics', 'Fashion', 'Footwear', 'Accessories', 'Home'] as $categoryName) {
             Category::query()->firstOrCreate(['name' => $categoryName]);
