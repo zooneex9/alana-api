@@ -22,6 +22,32 @@ class OrderController extends Controller
 {
     private const VAT_RATE = 0.16;
 
+    /**
+     * @param  array{buyer_name: string, buyer_email: string, password: string}  $validated
+     */
+    private function resolveCheckoutCustomer(array $validated): User|\Illuminate\Http\JsonResponse
+    {
+        $email = mb_strtolower($validated['buyer_email']);
+        $existing = User::query()->where('email', $email)->first();
+
+        if ($existing && $existing->hasRole('admin') && ! $existing->hasRole('customer')) {
+            return response()->json([
+                'message' => 'Este correo no puede usarse para compras en línea. Usa otro email o contacta a la tienda.',
+            ], 422);
+        }
+
+        $user = User::query()->updateOrCreate(
+            ['email' => $email],
+            [
+                'name' => $validated['buyer_name'],
+                'password' => Hash::make($validated['password']),
+            ]
+        );
+        $user->assignRole('customer');
+
+        return $user;
+    }
+
     private function surchargePctByPeriods(int $periods): float
     {
         if ($periods < 3) {
@@ -185,10 +211,16 @@ class OrderController extends Controller
             ], 422);
         }
 
+        $customerUser = $this->resolveCheckoutCustomer($validated);
+        if ($customerUser instanceof \Illuminate\Http\JsonResponse) {
+            return $customerUser;
+        }
+
         $order = Order::query()->create([
+            'user_id' => $customerUser->id,
             'product_id' => $product->id,
             'buyer_name' => $validated['buyer_name'],
-            'buyer_email' => $validated['buyer_email'],
+            'buyer_email' => $customerUser->email,
             'buyer_phone' => $validated['buyer_phone'],
             'buyer_address' => $validated['buyer_address'],
             'amount' => $chargeAmount,

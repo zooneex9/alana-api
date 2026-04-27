@@ -102,11 +102,17 @@ class ApiFlowTest extends TestCase
             'buyer_email' => 'jane@example.com',
             'buyer_phone' => '+525511112222',
             'buyer_address' => 'CDMX',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
         ]);
 
         $checkout->assertCreated();
         $sessionId = $checkout->json('order.stripe_checkout_session_id');
         $orderId = $checkout->json('order.id');
+        $this->assertDatabaseHas('orders', [
+            'id' => $orderId,
+            'user_id' => \App\Models\User::query()->where('email', 'jane@example.com')->value('id'),
+        ]);
 
         $payload = json_encode([
             'id' => 'evt_test_123',
@@ -169,9 +175,11 @@ class ApiFlowTest extends TestCase
             'mode' => 'separate',
             'payment_plan_index' => 0,
             'buyer_name' => 'Jane Doe',
-            'buyer_email' => 'jane@example.com',
+            'buyer_email' => 'jane.separate@example.com',
             'buyer_phone' => '+525511112222',
             'buyer_address' => 'CDMX',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
         ]);
 
         $checkout->assertCreated();
@@ -414,9 +422,11 @@ class ApiFlowTest extends TestCase
             'mode' => 'buy',
             'requires_invoice' => true,
             'buyer_name' => 'Jane Doe',
-            'buyer_email' => 'jane@example.com',
+            'buyer_email' => 'jane.invoice@example.com',
             'buyer_phone' => '+525511112222',
             'buyer_address' => 'CDMX',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
         ]);
 
         $checkout->assertCreated()
