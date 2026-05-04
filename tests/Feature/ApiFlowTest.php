@@ -111,7 +111,7 @@ class ApiFlowTest extends TestCase
         $orderId = $checkout->json('order.id');
         $this->assertDatabaseHas('orders', [
             'id' => $orderId,
-            'user_id' => \App\Models\User::query()->where('email', 'jane@example.com')->value('id'),
+            'user_id' => User::query()->where('email', 'jane@example.com')->value('id'),
         ]);
 
         $payload = json_encode([
@@ -367,6 +367,65 @@ class ApiFlowTest extends TestCase
             ->getJson('/api/v1/customer/orders')
             ->assertOk()
             ->assertJsonStructure(['data']);
+    }
+
+    public function test_customer_can_create_installment_checkout_session_for_own_order(): void
+    {
+        $customer = User::factory()->create([
+            'email' => 'plazos@example.com',
+            'password' => bcrypt('secret456'),
+        ]);
+        $customer->assignRole('customer');
+
+        $order = Order::factory()->create([
+            'user_id' => $customer->id,
+            'buyer_email' => 'plazos@example.com',
+            'status' => 'completed',
+            'meta' => [
+                'mode' => 'separate',
+                'pricing' => [
+                    'periods' => 3,
+                    'per_period_amount' => 500,
+                ],
+            ],
+        ]);
+
+        $token = $customer->createToken('test')->plainTextToken;
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/customer/orders/{$order->id}/installment-checkout-session", ['period' => 1])
+            ->assertCreated()
+            ->assertJsonPath('period', 1);
+
+        $order->refresh();
+        $this->assertArrayHasKey('1', $order->meta['installment_sessions'] ?? []);
+        $this->assertNotEmpty($order->meta['installment_sessions']['1']['url'] ?? null);
+    }
+
+    public function test_customer_cannot_create_installment_session_for_foreign_order(): void
+    {
+        $customer = User::factory()->create([
+            'email' => 'yo@example.com',
+            'password' => bcrypt('secret456'),
+        ]);
+        $customer->assignRole('customer');
+
+        $other = User::factory()->create();
+        $order = Order::factory()->create([
+            'user_id' => $other->id,
+            'buyer_email' => 'otro@example.com',
+            'status' => 'completed',
+            'meta' => [
+                'mode' => 'separate',
+                'pricing' => ['periods' => 2, 'per_period_amount' => 100],
+            ],
+        ]);
+
+        $token = $customer->createToken('test')->plainTextToken;
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/customer/orders/{$order->id}/installment-checkout-session", ['period' => 1])
+            ->assertForbidden();
     }
 
     public function test_admin_can_refund_completed_order(): void

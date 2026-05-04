@@ -4,13 +4,14 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AssignOrderCustomerRequest;
+use App\Http\Requests\CreateCheckoutSessionRequest;
 use App\Http\Requests\CreateInstallmentCheckoutSessionRequest;
 use App\Http\Requests\CreateShippingCheckoutSessionRequest;
-use App\Http\Requests\CreateCheckoutSessionRequest;
 use App\Http\Requests\StoreOrderRequest;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -22,10 +23,20 @@ class OrderController extends Controller
 {
     private const VAT_RATE = 0.16;
 
+    private function orderBelongsToCustomer(User $user, Order $order): bool
+    {
+        if ($order->user_id !== null && (int) $order->user_id === (int) $user->id) {
+            return true;
+        }
+
+        return $order->buyer_email !== null
+            && strcasecmp((string) $order->buyer_email, (string) $user->email) === 0;
+    }
+
     /**
      * @param  array{buyer_name: string, buyer_email: string, password: string}  $validated
      */
-    private function resolveCheckoutCustomer(array $validated): User|\Illuminate\Http\JsonResponse
+    private function resolveCheckoutCustomer(array $validated): User|JsonResponse
     {
         $email = mb_strtolower($validated['buyer_email']);
         $existing = User::query()->where('email', $email)->first();
@@ -212,7 +223,7 @@ class OrderController extends Controller
         }
 
         $customerUser = $this->resolveCheckoutCustomer($validated);
-        if ($customerUser instanceof \Illuminate\Http\JsonResponse) {
+        if ($customerUser instanceof JsonResponse) {
             return $customerUser;
         }
 
@@ -304,12 +315,14 @@ class OrderController extends Controller
         ], 201);
     }
 
-    public function createInstallmentCheckoutSession(CreateInstallmentCheckoutSessionRequest $request, Order $order)
+    /**
+     * Crea (o renueva) la sesión de Stripe Checkout para un periodo de apartado.
+     */
+    private function installmentCheckoutSessionResponse(Order $order, int $period): JsonResponse
     {
         $pricing = $order->meta['pricing'] ?? [];
         $mode = $order->meta['mode'] ?? null;
         $totalPeriods = (int) ($pricing['periods'] ?? 0);
-        $period = (int) $request->validated('period');
 
         if ($mode !== 'separate') {
             return response()->json([
@@ -394,6 +407,29 @@ class OrderController extends Controller
             'checkout_url' => $sessionUrl,
             'order' => $order->fresh()->load(['product', 'user']),
         ], 201);
+    }
+
+    public function createInstallmentCheckoutSession(CreateInstallmentCheckoutSessionRequest $request, Order $order): JsonResponse
+    {
+        return $this->installmentCheckoutSessionResponse($order, (int) $request->validated('period'));
+    }
+
+    public function customerCreateInstallmentCheckoutSession(Request $request, Order $order): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user instanceof User) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        if (! $this->orderBelongsToCustomer($user, $order)) {
+            return response()->json(['message' => 'No autorizado.'], 403);
+        }
+
+        $validated = $request->validate([
+            'period' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return $this->installmentCheckoutSessionResponse($order, (int) $validated['period']);
     }
 
     public function createShippingCheckoutSession(CreateShippingCheckoutSessionRequest $request, Order $order)

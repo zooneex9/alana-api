@@ -41,5 +41,6 @@ Route::prefix('v1')->group(function (): void {
         });
 
         Route::get('/customer/orders', [OrderController::class, 'customerIndex']);
+        Route::post('/customer/orders/{order}/installment-checkout-session', [OrderController::class, 'customerCreateInstallmentCheckoutSession']);
     });
 });
