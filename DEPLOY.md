@@ -7,7 +7,7 @@ SSH: `forge@147.182.129.19`
 
 ### Forge deploy script
 
-This project is **API-only**. Do **not** run `npm install` / `npm run build` on Forge (Node 18 breaks Vite 8; assets are not needed).
+This project is **API-only**. Forge may still run `npm run build`; the script is a no-op and does not require Node 20/Vite. Prefer the deploy script in [`forge-deploy.sh`](./forge-deploy.sh) without npm steps.
 
 Copy the contents of [`forge-deploy.sh`](./forge-deploy.sh) into **Forge → Site → Deploy Script**.
 
