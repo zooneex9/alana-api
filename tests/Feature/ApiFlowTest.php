@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\Order;
 use App\Models\Product;
+use App\Models\RentalBlock;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Role;
@@ -18,20 +18,18 @@ class ApiFlowTest extends TestCase
         parent::setUp();
 
         Role::findOrCreate('admin');
-        Role::findOrCreate('buyer');
-        Role::findOrCreate('customer');
     }
 
     public function test_admin_can_login_and_fetch_profile(): void
     {
         $user = User::factory()->create([
-            'email' => 'admin@bodega.test',
+            'email' => 'admin@alana.test',
             'password' => bcrypt('password123'),
         ]);
         $user->assignRole('admin');
 
         $loginResponse = $this->postJson('/api/v1/auth/login', [
-            'email' => 'admin@bodega.test',
+            'email' => 'admin@alana.test',
             'password' => 'password123',
         ]);
 
@@ -45,453 +43,149 @@ class ApiFlowTest extends TestCase
         $this->withHeader('Authorization', "Bearer {$token}")
             ->getJson('/api/v1/auth/me')
             ->assertOk()
-            ->assertJsonPath('user.email', 'admin@bodega.test');
+            ->assertJsonPath('user.email', 'admin@alana.test');
     }
 
-    public function test_admin_can_create_product_and_update_status(): void
+    public function test_admin_can_create_dress_and_update_status(): void
     {
         $admin = User::factory()->create();
         $admin->assignRole('admin');
-
         $token = $admin->createToken('test')->plainTextToken;
 
         $create = $this->withHeader('Authorization', "Bearer {$token}")
             ->postJson('/api/v1/products', [
-                'name' => 'MacBook Air M4',
-                'description' => '16GB RAM, 512GB SSD',
-                'price' => 29999,
-                'quantity' => 2,
+                'name' => 'Vestido Rosa',
+                'description' => 'Vestido largo para gala',
+                'rental_price_daily' => 1200,
+                'quantity' => 1,
                 'status' => 'available',
-                'payment_plans' => [
-                    [
-                        'type' => 'installment',
-                        'down_payment' => 9000,
-                        'periods' => 4,
-                        'frequency' => 'monthly',
-                    ],
-                ],
-                'category' => 'Electronics',
-                'item_condition' => 'new',
+                'category' => 'Gala',
+                'size' => 'M',
+                'color' => 'Rosa',
                 'date_added' => now()->toDateString(),
             ]);
 
-        $create->assertCreated()->assertJsonPath('name', 'MacBook Air M4');
+        $create->assertCreated()->assertJsonPath('name', 'Vestido Rosa');
         $productId = $create->json('id');
 
         $this->withHeader('Authorization', "Bearer {$token}")
-            ->patchJson("/api/v1/products/{$productId}/status", ['status' => 'separated'])
+            ->patchJson("/api/v1/products/{$productId}/status", ['status' => 'reserved'])
             ->assertOk()
-            ->assertJsonPath('status', 'separated');
+            ->assertJsonPath('status', 'reserved');
     }
 
-    public function test_checkout_session_and_webhook_marks_order_completed(): void
+    public function test_public_can_list_products_and_check_availability(): void
     {
-        $product = Product::factory()->create([
-            'status' => 'available',
-            'price' => 5000,
-            'quantity' => 1,
-            'payment_plans' => [
-                ['type' => 'full'],
-            ],
-        ]);
+        $product = Product::factory()->create();
 
-        $checkout = $this->postJson('/api/v1/orders/checkout-session', [
+        $this->getJson('/api/v1/products')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $product->id);
+
+        RentalBlock::query()->create([
             'product_id' => $product->id,
-            'mode' => 'buy',
-            'buyer_name' => 'Jane Doe',
-            'buyer_email' => 'jane@example.com',
-            'buyer_phone' => '+525511112222',
-            'buyer_address' => 'CDMX',
-            'password' => 'password123',
-            'password_confirmation' => 'password123',
+            'start_date' => now()->addDays(5)->toDateString(),
+            'end_date' => now()->addDays(7)->toDateString(),
+            'status' => 'reserved',
         ]);
 
-        $checkout->assertCreated();
-        $sessionId = $checkout->json('order.stripe_checkout_session_id');
-        $orderId = $checkout->json('order.id');
-        $this->assertDatabaseHas('orders', [
-            'id' => $orderId,
-            'user_id' => User::query()->where('email', 'jane@example.com')->value('id'),
-        ]);
-
-        $payload = json_encode([
-            'id' => 'evt_test_123',
-            'type' => 'checkout.session.completed',
-            'data' => [
-                'object' => [
-                    'id' => $sessionId,
-                    'payment_intent' => 'pi_test_123',
-                    'metadata' => [
-                        'order_id' => (string) $orderId,
-                        'product_id' => (string) $product->id,
-                        'mode' => 'buy',
-                    ],
-                ],
-            ],
-        ], JSON_THROW_ON_ERROR);
-
-        $timestamp = time();
-        $signature = hash_hmac('sha256', "{$timestamp}.{$payload}", config('services.stripe.webhook_secret'));
-        $header = "t={$timestamp},v1={$signature}";
-
-        $this->withHeaders([
-            'Stripe-Signature' => $header,
-            'CONTENT_TYPE' => 'application/json',
-        ])->call(
-            'POST',
-            '/api/v1/stripe/webhook',
-            [],
-            [],
-            [],
-            [],
-            $payload
-        )->assertOk();
-
-        $this->assertDatabaseHas('orders', [
-            'id' => $orderId,
-            'status' => 'completed',
-            'stripe_payment_intent_id' => 'pi_test_123',
-        ]);
-        $this->assertDatabaseHas('products', [
-            'id' => $product->id,
-            'status' => 'sold',
-            'quantity' => 0,
-        ]);
+        $this->getJson("/api/v1/products/{$product->id}/availability")
+            ->assertOk()
+            ->assertJsonPath('product_id', $product->id)
+            ->assertJsonCount(1, 'blocks');
     }
 
-    public function test_separate_initial_webhook_does_not_decrement_stock(): void
-    {
-        $product = Product::factory()->create([
-            'status' => 'available',
-            'price' => 10000,
-            'quantity' => 2,
-            'payment_plans' => [
-                ['type' => 'installment', 'down_payment' => 2000, 'periods' => 4, 'frequency' => 'weekly'],
-            ],
-        ]);
-
-        $checkout = $this->postJson('/api/v1/orders/checkout-session', [
-            'product_id' => $product->id,
-            'mode' => 'separate',
-            'payment_plan_index' => 0,
-            'buyer_name' => 'Jane Doe',
-            'buyer_email' => 'jane.separate@example.com',
-            'buyer_phone' => '+525511112222',
-            'buyer_address' => 'CDMX',
-            'password' => 'password123',
-            'password_confirmation' => 'password123',
-        ]);
-
-        $checkout->assertCreated();
-        $sessionId = $checkout->json('order.stripe_checkout_session_id');
-        $orderId = $checkout->json('order.id');
-
-        $payload = json_encode([
-            'id' => 'evt_test_999',
-            'type' => 'checkout.session.completed',
-            'data' => [
-                'object' => [
-                    'id' => $sessionId,
-                    'payment_intent' => 'pi_test_sep_1',
-                    'metadata' => [
-                        'order_id' => (string) $orderId,
-                        'checkout_kind' => 'initial',
-                        'mode' => 'separate',
-                    ],
-                ],
-            ],
-        ], JSON_THROW_ON_ERROR);
-
-        $this->postJson('/api/v1/stripe/webhook', json_decode($payload, true))->assertOk();
-
-        $this->assertDatabaseHas('products', [
-            'id' => $product->id,
-            'quantity' => 2,
-            'status' => 'separated',
-        ]);
-    }
-
-    public function test_admin_can_create_installment_checkout_session_and_webhook_updates_meta(): void
+    public function test_admin_can_manage_rental_blocks(): void
     {
         $admin = User::factory()->create();
         $admin->assignRole('admin');
         $token = $admin->createToken('test')->plainTextToken;
-
-        $order = Order::factory()->create([
-            'status' => 'completed',
-            'meta' => [
-                'mode' => 'separate',
-                'pricing' => [
-                    'periods' => 3,
-                    'per_period_amount' => 1000,
-                ],
-            ],
-        ]);
+        $product = Product::factory()->create();
 
         $create = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson("/api/v1/orders/{$order->id}/installment-checkout-session", ['period' => 2]);
-        $create->assertCreated()->assertJsonPath('period', 2);
-
-        $order->refresh();
-        $sessionId = $order->meta['installment_sessions']['2']['session_id'] ?? null;
-        $this->assertNotNull($sessionId);
-
-        $payload = [
-            'id' => 'evt_inst_1',
-            'type' => 'checkout.session.completed',
-            'data' => [
-                'object' => [
-                    'id' => $sessionId,
-                    'payment_intent' => 'pi_inst_2',
-                    'metadata' => [
-                        'checkout_kind' => 'installment',
-                        'parent_order_id' => (string) $order->id,
-                        'period' => '2',
-                    ],
-                ],
-            ],
-        ];
-
-        $this->postJson('/api/v1/stripe/webhook', $payload)->assertOk();
-
-        $this->assertDatabaseHas('orders', ['id' => $order->id]);
-        $order->refresh();
-        $this->assertSame('completed', $order->meta['installment_sessions']['2']['status']);
-    }
-
-    public function test_admin_shipping_checkout_session_applies_vat_when_order_requires_invoice(): void
-    {
-        $admin = User::factory()->create();
-        $admin->assignRole('admin');
-        $token = $admin->createToken('test')->plainTextToken;
-
-        $order = Order::factory()->create([
-            'status' => 'completed',
-            'meta' => [
-                'mode' => 'buy',
-                'requires_invoice' => true,
-            ],
-        ]);
-
-        $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson("/api/v1/orders/{$order->id}/shipping-checkout-session", [
-                'amount' => 100,
-                'note' => 'DHL',
-            ])
-            ->assertCreated()
-            ->assertJsonPath('amount_subtotal', 100)
-            ->assertJsonPath('amount_charged', 116);
-    }
-
-    public function test_shipping_webhook_marks_charge_completed_without_stock_change(): void
-    {
-        $admin = User::factory()->create();
-        $admin->assignRole('admin');
-        $token = $admin->createToken('test')->plainTextToken;
-
-        $product = Product::factory()->create([
-            'status' => 'available',
-            'quantity' => 3,
-        ]);
-
-        $order = Order::factory()->create([
-            'product_id' => $product->id,
-            'status' => 'completed',
-            'meta' => [
-                'mode' => 'buy',
-                'requires_invoice' => false,
-            ],
-        ]);
-
-        $create = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson("/api/v1/orders/{$order->id}/shipping-checkout-session", ['amount' => 80]);
-        $create->assertCreated();
-        $chargeId = $create->json('shipping_charge_id');
-        $this->assertNotEmpty($chargeId);
-
-        $order->refresh();
-        $sessionId = $order->meta['shipping_charges'][$chargeId]['session_id'] ?? null;
-        $this->assertNotNull($sessionId);
-
-        $payload = [
-            'id' => 'evt_ship_1',
-            'type' => 'checkout.session.completed',
-            'data' => [
-                'object' => [
-                    'id' => $sessionId,
-                    'payment_intent' => 'pi_ship_1',
-                    'metadata' => [
-                        'checkout_kind' => 'shipping',
-                        'parent_order_id' => (string) $order->id,
-                        'shipping_charge_id' => $chargeId,
-                    ],
-                ],
-            ],
-        ];
-
-        $this->postJson('/api/v1/stripe/webhook', $payload)->assertOk();
-
-        $order->refresh();
-        $this->assertSame('completed', $order->meta['shipping_charges'][$chargeId]['status']);
-        $product->refresh();
-        $this->assertSame(3, $product->quantity);
-    }
-
-    public function test_admin_can_assign_customer_and_customer_can_see_own_orders(): void
-    {
-        $admin = User::factory()->create();
-        $admin->assignRole('admin');
-        $adminToken = $admin->createToken('test')->plainTextToken;
-
-        $order = Order::factory()->create([
-            'buyer_name' => 'Cliente Demo',
-            'buyer_email' => 'cliente@example.com',
-        ]);
-
-        $this->withHeader('Authorization', "Bearer {$adminToken}")
-            ->postJson("/api/v1/orders/{$order->id}/assign-customer", [
-                'name' => 'Cliente Demo',
-                'email' => 'cliente@example.com',
-                'password' => 'password123',
-            ])
-            ->assertOk();
-
-        $login = $this->postJson('/api/v1/auth/customer/login', [
-            'email' => 'cliente@example.com',
-            'password' => 'password123',
-        ]);
-        $login->assertOk();
-
-        $customerToken = $login->json('token');
-        $this->withHeader('Authorization', "Bearer {$customerToken}")
-            ->getJson('/api/v1/customer/orders')
-            ->assertOk()
-            ->assertJsonStructure(['data']);
-    }
-
-    public function test_customer_can_create_installment_checkout_session_for_own_order(): void
-    {
-        $customer = User::factory()->create([
-            'email' => 'plazos@example.com',
-            'password' => bcrypt('secret456'),
-        ]);
-        $customer->assignRole('customer');
-
-        $order = Order::factory()->create([
-            'user_id' => $customer->id,
-            'buyer_email' => 'plazos@example.com',
-            'status' => 'completed',
-            'meta' => [
-                'mode' => 'separate',
-                'pricing' => [
-                    'periods' => 3,
-                    'per_period_amount' => 500,
-                ],
-            ],
-        ]);
-
-        $token = $customer->createToken('test')->plainTextToken;
-
-        $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson("/api/v1/customer/orders/{$order->id}/installment-checkout-session", ['period' => 1])
-            ->assertCreated()
-            ->assertJsonPath('period', 1);
-
-        $order->refresh();
-        $this->assertArrayHasKey('1', $order->meta['installment_sessions'] ?? []);
-        $this->assertNotEmpty($order->meta['installment_sessions']['1']['url'] ?? null);
-    }
-
-    public function test_customer_cannot_create_installment_session_for_foreign_order(): void
-    {
-        $customer = User::factory()->create([
-            'email' => 'yo@example.com',
-            'password' => bcrypt('secret456'),
-        ]);
-        $customer->assignRole('customer');
-
-        $other = User::factory()->create();
-        $order = Order::factory()->create([
-            'user_id' => $other->id,
-            'buyer_email' => 'otro@example.com',
-            'status' => 'completed',
-            'meta' => [
-                'mode' => 'separate',
-                'pricing' => ['periods' => 2, 'per_period_amount' => 100],
-            ],
-        ]);
-
-        $token = $customer->createToken('test')->plainTextToken;
-
-        $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson("/api/v1/customer/orders/{$order->id}/installment-checkout-session", ['period' => 1])
-            ->assertForbidden();
-    }
-
-    public function test_admin_can_refund_completed_order(): void
-    {
-        $admin = User::factory()->create();
-        $admin->assignRole('admin');
-        $token = $admin->createToken('test')->plainTextToken;
-
-        $product = Product::factory()->create([
-            'status' => 'sold',
-        ]);
-
-        $order = Order::factory()->create([
-            'product_id' => $product->id,
-            'status' => 'completed',
-            'payment_method' => 'stripe',
-            'stripe_payment_intent_id' => 'pi_test_refund_1',
-            'amount' => 2500,
-        ]);
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson("/api/v1/orders/{$order->id}/refund", [
-                'reason' => 'requested_by_customer',
+            ->postJson('/api/v1/rental-blocks', [
+                'product_id' => $product->id,
+                'start_date' => now()->addDays(2)->toDateString(),
+                'end_date' => now()->addDays(4)->toDateString(),
+                'status' => 'reserved',
+                'customer_name' => 'María',
             ]);
 
-        $response->assertOk()->assertJsonPath('order.status', 'cancelled');
+        $create->assertCreated()->assertJsonPath('customer_name', 'María');
+        $blockId = $create->json('id');
 
-        $this->assertDatabaseHas('orders', [
-            'id' => $order->id,
-            'status' => 'cancelled',
-            'refund_reason' => 'requested_by_customer',
-        ]);
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson('/api/v1/rental-blocks?product_id='.$product->id)
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $blockId);
 
-        $this->assertDatabaseHas('products', [
-            'id' => $product->id,
-            'status' => 'available',
-        ]);
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->deleteJson("/api/v1/rental-blocks/{$blockId}")
+            ->assertNoContent();
     }
 
-    public function test_checkout_session_applies_invoice_vat_to_buy_mode(): void
+    public function test_admin_can_manage_customers_and_product_rental_history(): void
     {
-        $product = Product::factory()->create([
-            'status' => 'available',
-            'price' => 1000,
-            'quantity' => 1,
-            'payment_plans' => [
-                ['type' => 'full'],
-            ],
-        ]);
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $token = $admin->createToken('test')->plainTextToken;
+        $product = Product::factory()->create();
 
-        $checkout = $this->postJson('/api/v1/orders/checkout-session', [
+        $createCustomer = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/customers', [
+                'name' => 'Ana García',
+                'phone' => '8181234567',
+                'email' => 'ana@example.com',
+            ]);
+
+        $createCustomer->assertCreated()->assertJsonPath('name', 'Ana García');
+        $customerId = $createCustomer->json('id');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/rental-blocks', [
+                'product_id' => $product->id,
+                'customer_id' => $customerId,
+                'start_date' => '2026-07-01',
+                'end_date' => '2026-07-03',
+                'status' => 'reserved',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('customer.name', 'Ana García');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson("/api/v1/products/{$product->id}/rental-history")
+            ->assertOk()
+            ->assertJsonPath('product_id', $product->id)
+            ->assertJsonCount(1, 'rentals');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson("/api/v1/customers/{$customerId}")
+            ->assertOk()
+            ->assertJsonPath('name', 'Ana García')
+            ->assertJsonCount(1, 'rental_blocks');
+    }
+
+    public function test_rental_blocks_cannot_overlap(): void
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $token = $admin->createToken('test')->plainTextToken;
+        $product = Product::factory()->create();
+
+        RentalBlock::query()->create([
             'product_id' => $product->id,
-            'mode' => 'buy',
-            'requires_invoice' => true,
-            'buyer_name' => 'Jane Doe',
-            'buyer_email' => 'jane.invoice@example.com',
-            'buyer_phone' => '+525511112222',
-            'buyer_address' => 'CDMX',
-            'password' => 'password123',
-            'password_confirmation' => 'password123',
+            'start_date' => '2026-06-10',
+            'end_date' => '2026-06-15',
+            'status' => 'blocked',
         ]);
 
-        $checkout->assertCreated()
-            ->assertJsonPath('order.amount', 1160)
-            ->assertJsonPath('order.meta.requires_invoice', true)
-            ->assertJsonPath('order.meta.pricing.vat_amount', 160)
-            ->assertJsonPath('order.meta.pricing.total', 1160);
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/rental-blocks', [
+                'product_id' => $product->id,
+                'start_date' => '2026-06-12',
+                'end_date' => '2026-06-18',
+                'status' => 'reserved',
+            ])
+            ->assertStatus(422);
     }
 }

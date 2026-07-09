@@ -1,14 +1,14 @@
-# Bodega API (`bodega-api`)
+# Alana Dress Rental API (`alana-api`)
 
-Laravel 13 API for Bodega catalog/admin/orders.
+Laravel 13 API for Alana Dress Rental: catalog, admin, rental blocks, and customers.
 
 ## Features
 
 - Sanctum token auth
 - Role-based admin access (`spatie/laravel-permission`)
-- Product CRUD + status transitions
-- Order management
-- Stripe Checkout session creation + webhook reconciliation
+- Dress catalog CRUD
+- Rental blocks (calendar availability)
+- Customer catalog + rental history per dress
 - S3 image uploads for product images
 - Dashboard summary endpoint
 
@@ -21,9 +21,9 @@ cp .env.example .env
 ```
 
 Required sections:
+
 - MySQL connection (`DB_*`)
-- S3 credentials (`AWS_*`)
-- Stripe credentials (`STRIPE_KEY`, `STRIPE_SECRET`, `STRIPE_WEBHOOK_SECRET`)
+- S3 credentials (`AWS_*`) for dress images
 - Frontend URL (`FRONTEND_URL`)
 
 ## Install / Run
@@ -36,25 +36,19 @@ php artisan serve
 ```
 
 Default seeded admin:
-- `admin@bodega.test`
-- `password123`
+
+- `admin@bodega.com` / `bodega123`
+- `admin@bodega.test` / `password123`
 
 ## API Base
 
 `/api/v1`
 
 Main routes:
+
 - `POST /auth/login`
 - `GET /products`
-- `POST /orders/checkout-session`
-- `POST /stripe/webhook`
-- Admin (requires `auth:sanctum` + `role:admin`):
-  - `GET /dashboard/summary`
-  - `POST|PUT|PATCH|DELETE /products`
-  - `GET|POST|PUT /orders`
-
-## Tests
-
-```bash
-php artisan test
-```
+- `GET /products/{id}/availability`
+- `GET /rental-blocks` (admin)
+- `GET /customers` (admin)
+- `GET /products/{id}/rental-history` (admin)

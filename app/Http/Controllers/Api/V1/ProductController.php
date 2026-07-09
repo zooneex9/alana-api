@@ -151,7 +151,7 @@ class ProductController extends Controller
     public function updateStatus(Request $request, Product $product)
     {
         $validated = $request->validate([
-            'status' => ['required', 'in:available,separated,sold'],
+            'status' => ['required', 'in:available,reserved,rented'],
         ]);
 
         $product->update(['status' => $validated['status']]);

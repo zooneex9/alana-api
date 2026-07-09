@@ -19,6 +19,12 @@ class Product extends Model
         'status',
         'payment_plans',
         'category',
+        'size',
+        'color',
+        'rental_price_daily',
+        'rental_price_weekend',
+        'deposit',
+        'rental_duration_days',
         'item_condition',
         'shipping_to_agree',
         'date_added',
@@ -28,6 +34,10 @@ class Product extends Model
     protected $casts = [
         'shipping_to_agree' => 'boolean',
         'price' => 'float',
+        'rental_price_daily' => 'float',
+        'rental_price_weekend' => 'float',
+        'deposit' => 'float',
+        'rental_duration_days' => 'integer',
         'quantity' => 'integer',
         'date_added' => 'date',
         'payment_plans' => 'array',
@@ -62,6 +72,11 @@ class Product extends Model
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class);
+    }
+
+    public function rentalBlocks(): HasMany
+    {
+        return $this->hasMany(RentalBlock::class);
     }
 
     /**

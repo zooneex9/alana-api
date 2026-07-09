@@ -11,38 +11,31 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class ProductFactory extends Factory
 {
     /**
-     * Define the model's default state.
-     *
      * @return array<string, mixed>
      */
     public function definition(): array
     {
-        $installment = fake()->boolean(50);
+        $daily = fake()->randomFloat(2, 500, 5000);
 
         return [
             'name' => fake()->words(3, true),
             'description' => fake()->sentence(20),
-            'price' => fake()->randomFloat(2, 1000, 50000),
-            'quantity' => fake()->numberBetween(1, 5),
-            'status' => fake()->randomElement(['available', 'separated', 'sold']),
-            'payment_plans' => $installment
-                ? [
-                    ['type' => 'full'],
-                    [
-                        'type' => 'installment',
-                        'down_payment' => (float) fake()->numberBetween(500, 5000),
-                        'installments' => fake()->numberBetween(2, 6),
-                    ],
-                ]
-                : [
-                    ['type' => 'full'],
-                ],
-            'category' => fake()->randomElement(['Electronics', 'Fashion', 'Footwear', 'Accessories', 'Home']),
-            'item_condition' => fake()->randomElement(['new', 'used_like_new', 'used_good']),
+            'price' => $daily,
+            'rental_price_daily' => $daily,
+            'rental_price_weekend' => fake()->optional()->randomFloat(2, 800, 8000),
+            'deposit' => fake()->optional()->randomFloat(2, 500, 3000),
+            'rental_duration_days' => fake()->randomElement([2, 3, 4, 5]),
+            'quantity' => 1,
+            'status' => fake()->randomElement(['available', 'reserved', 'rented']),
+            'payment_plans' => [['type' => 'full']],
+            'category' => fake()->randomElement(['Gala', 'Civil', 'XV Años', 'Cocktail']),
+            'size' => fake()->randomElement(['XS', 'S', 'M', 'L', '8', '10']),
+            'color' => fake()->safeColorName(),
+            'item_condition' => 'new',
             'shipping_to_agree' => false,
             'date_added' => fake()->date(),
             'images' => [
-                ['path' => null, 'url' => fake()->imageUrl(800, 800)],
+                ['path' => null, 'url' => fake()->imageUrl(800, 1200)],
             ],
         ];
     }
