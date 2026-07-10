@@ -17,6 +17,15 @@ class RolesAndAdminSeeder extends Seeder
         $buyerRole = Role::findOrCreate('buyer');
         $customerRole = Role::findOrCreate('customer');
 
+        $alanaAdmin = User::query()->firstOrCreate(
+            ['email' => 'admin@alana.com'],
+            [
+                'name' => 'Alana Admin',
+                'password' => Hash::make('alana2026'),
+            ]
+        );
+        $alanaAdmin->assignRole($adminRole);
+
         $admin = User::query()->firstOrCreate(
             ['email' => 'admin@bodega.test'],
             [

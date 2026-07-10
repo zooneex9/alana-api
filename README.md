@@ -35,7 +35,11 @@ php artisan migrate --seed
 php artisan serve
 ```
 
-Default seeded admin:
+Default seeded admin (Alana):
+
+- `admin@alana.com` / `alana2026`
+
+Legacy dev accounts (optional):
 
 - `admin@bodega.com` / `bodega123`
 - `admin@bodega.test` / `password123`
