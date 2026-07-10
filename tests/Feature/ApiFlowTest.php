@@ -188,4 +188,66 @@ class ApiFlowTest extends TestCase
             ])
             ->assertStatus(422);
     }
+
+    public function test_products_can_be_filtered_by_dress_taxonomy(): void
+    {
+        $match = Product::factory()->create([
+            'dress_length' => 'largo',
+            'occasions' => ['boda', 'night_out'],
+            'is_vintage' => true,
+            'is_new_arrival' => true,
+            'is_dr_fave' => true,
+        ]);
+
+        Product::factory()->create([
+            'dress_length' => 'corto',
+            'occasions' => ['posada'],
+            'is_vintage' => false,
+            'is_new_arrival' => false,
+            'is_dr_fave' => false,
+        ]);
+
+        $this->getJson('/api/v1/products?dress_length=largo')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $match->id);
+
+        $this->getJson('/api/v1/products?occasions=boda,night_out')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $match->id);
+
+        $this->getJson('/api/v1/products?vintage=1&new=1&faves=1')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $match->id);
+    }
+
+    public function test_admin_can_save_dress_taxonomy_on_product(): void
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $token = $admin->createToken('test')->plainTextToken;
+
+        $create = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/products', [
+                'name' => 'Vintage Boda',
+                'description' => 'Vestido largo vintage para boda',
+                'rental_price_daily' => 1500,
+                'quantity' => 1,
+                'status' => 'available',
+                'category' => 'Gala',
+                'dress_length' => 'largo',
+                'occasions' => ['boda', 'boda_playa'],
+                'is_vintage' => true,
+                'is_new_arrival' => true,
+                'is_dr_fave' => true,
+                'date_added' => now()->toDateString(),
+            ]);
+
+        $create->assertCreated()
+            ->assertJsonPath('dress_length', 'largo')
+            ->assertJsonPath('is_vintage', true)
+            ->assertJsonPath('is_dr_fave', true);
+    }
 }

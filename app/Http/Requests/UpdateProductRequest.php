@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\DressTaxonomy;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -35,6 +36,17 @@ class UpdateProductRequest extends FormRequest
         if ($this->has('rental_price_daily') && ! $this->has('price')) {
             $this->merge(['price' => (float) $this->input('rental_price_daily')]);
         }
+        foreach (['is_vintage', 'is_new_arrival', 'is_dr_fave'] as $flag) {
+            if ($this->has($flag)) {
+                $this->merge([$flag => filter_var($this->input($flag), FILTER_VALIDATE_BOOLEAN)]);
+            }
+        }
+        if ($this->has('occasions') && is_string($this->input('occasions'))) {
+            $decoded = json_decode($this->input('occasions'), true);
+            if (is_array($decoded)) {
+                $this->merge(['occasions' => $decoded]);
+            }
+        }
     }
 
     /**
@@ -53,6 +65,12 @@ class UpdateProductRequest extends FormRequest
             'quantity' => ['sometimes', 'integer', 'min:0'],
             'status' => ['sometimes', 'in:available,reserved,rented'],
             'category' => ['sometimes', 'string', 'max:120'],
+            'dress_length' => ['nullable', 'string', 'in:'.implode(',', DressTaxonomy::LENGTHS)],
+            'occasions' => DressTaxonomy::occasionRules(),
+            'occasions.*' => DressTaxonomy::occasionItemRules(),
+            'is_vintage' => ['nullable', 'boolean'],
+            'is_new_arrival' => ['nullable', 'boolean'],
+            'is_dr_fave' => ['nullable', 'boolean'],
             'size' => ['nullable', 'string', 'max:32'],
             'color' => ['nullable', 'string', 'max:64'],
             'date_added' => ['sometimes', 'date'],

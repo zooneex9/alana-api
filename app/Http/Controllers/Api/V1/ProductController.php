@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Models\Product;
+use App\Support\DressTaxonomy;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
@@ -20,6 +21,25 @@ class ProductController extends Controller
         $products = Product::query()
             ->when($request->string('status')->isNotEmpty(), fn ($query) => $query->where('status', $request->string('status')->toString()))
             ->when($request->string('category')->isNotEmpty(), fn ($query) => $query->where('category', $request->string('category')->toString()))
+            ->when($request->string('dress_length')->isNotEmpty(), fn ($query) => $query->where('dress_length', $request->string('dress_length')->toString()))
+            ->when($request->string('occasions')->isNotEmpty(), function ($query) use ($request): void {
+                $slugs = array_values(array_filter(array_map(
+                    'trim',
+                    explode(',', $request->string('occasions')->toString())
+                )));
+                $allowed = array_values(array_intersect($slugs, DressTaxonomy::OCCASIONS));
+                if ($allowed === []) {
+                    return;
+                }
+                $query->where(function ($inner) use ($allowed): void {
+                    foreach ($allowed as $slug) {
+                        $inner->orWhereJsonContains('occasions', $slug);
+                    }
+                });
+            })
+            ->when($request->boolean('is_vintage') || $request->string('vintage')->toString() === '1', fn ($query) => $query->where('is_vintage', true))
+            ->when($request->boolean('is_new_arrival') || $request->string('new')->toString() === '1', fn ($query) => $query->where('is_new_arrival', true))
+            ->when($request->boolean('is_dr_fave') || $request->string('faves')->toString() === '1', fn ($query) => $query->where('is_dr_fave', true))
             ->when($request->string('search')->isNotEmpty(), function ($query) use ($request): void {
                 $term = $request->string('search')->toString();
                 $query->where(function ($inner) use ($term): void {

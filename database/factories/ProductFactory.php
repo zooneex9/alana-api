@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Product;
+use App\Support\DressTaxonomy;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -29,6 +30,14 @@ class ProductFactory extends Factory
             'status' => fake()->randomElement(['available', 'reserved', 'rented']),
             'payment_plans' => [['type' => 'full']],
             'category' => fake()->randomElement(['Gala', 'Civil', 'XV Años', 'Cocktail']),
+            'dress_length' => fake()->optional()->randomElement(DressTaxonomy::LENGTHS),
+            'occasions' => fake()->optional()->randomElements(
+                DressTaxonomy::OCCASIONS,
+                fake()->numberBetween(1, 2)
+            ),
+            'is_vintage' => false,
+            'is_new_arrival' => false,
+            'is_dr_fave' => false,
             'size' => fake()->randomElement(['XS', 'S', 'M', 'L', '8', '10']),
             'color' => fake()->safeColorName(),
             'item_condition' => 'new',
