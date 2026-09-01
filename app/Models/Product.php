@@ -19,6 +19,7 @@ class Product extends Model
         'status',
         'payment_plans',
         'category',
+        'categories',
         'dress_length',
         'occasions',
         'is_vintage',
@@ -26,6 +27,7 @@ class Product extends Model
         'is_dr_fave',
         'size',
         'color',
+        'colors',
         'rental_price_daily',
         'rental_price_weekend',
         'deposit',
@@ -38,6 +40,8 @@ class Product extends Model
 
     protected $casts = [
         'shipping_to_agree' => 'boolean',
+        'categories' => 'array',
+        'colors' => 'array',
         'occasions' => 'array',
         'is_vintage' => 'boolean',
         'is_new_arrival' => 'boolean',

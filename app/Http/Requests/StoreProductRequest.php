@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Support\DressTaxonomy;
+use App\Support\ProductColors;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -47,6 +48,24 @@ class StoreProductRequest extends FormRequest
                 $this->merge(['occasions' => $decoded]);
             }
         }
+        if ($this->has('categories') && is_string($this->input('categories'))) {
+            $decoded = json_decode($this->input('categories'), true);
+            if (is_array($decoded)) {
+                $this->merge(['categories' => $decoded]);
+            }
+        }
+        if ($this->filled('category') && ! $this->has('categories')) {
+            $this->merge(['categories' => [(string) $this->input('category')]]);
+        }
+        if ($this->has('colors') && is_string($this->input('colors'))) {
+            $decoded = json_decode($this->input('colors'), true);
+            if (is_array($decoded)) {
+                $this->merge(['colors' => $decoded]);
+            }
+        }
+        if ($this->has('colors')) {
+            $this->merge(['colors' => ProductColors::normalizeList($this->input('colors'))]);
+        }
     }
 
     /**
@@ -65,6 +84,8 @@ class StoreProductRequest extends FormRequest
             'quantity' => ['required', 'integer', 'min:0'],
             'status' => ['required', 'in:available,reserved,rented'],
             'category' => ['required', 'string', 'max:120'],
+            'categories' => ['nullable', 'array', 'max:12'],
+            'categories.*' => ['string', 'max:120'],
             'dress_length' => ['nullable', 'string', 'in:'.implode(',', DressTaxonomy::LENGTHS)],
             'occasions' => DressTaxonomy::occasionRules(),
             'occasions.*' => DressTaxonomy::occasionItemRules(),
@@ -73,6 +94,8 @@ class StoreProductRequest extends FormRequest
             'is_dr_fave' => ['nullable', 'boolean'],
             'size' => ['nullable', 'string', 'max:32'],
             'color' => ['nullable', 'string', 'max:64'],
+            'colors' => ['nullable', 'array', 'max:'.ProductColors::MAX],
+            'colors.*' => ['regex:/^#[0-9A-Fa-f]{6}$/'],
             'date_added' => ['nullable', 'date'],
             'images' => ['nullable', 'array', 'max:20'],
             'images.*' => ['file', 'image', 'max:5120'],

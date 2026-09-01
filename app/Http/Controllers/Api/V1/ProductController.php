@@ -18,9 +18,21 @@ class ProductController extends Controller
 {
     public function index(Request $request)
     {
+        $categorySlugs = array_values(array_filter(array_map(
+            'trim',
+            explode(',', $request->string('category')->toString())
+        )));
+
         $products = Product::query()
             ->when($request->string('status')->isNotEmpty(), fn ($query) => $query->where('status', $request->string('status')->toString()))
-            ->when($request->string('category')->isNotEmpty(), fn ($query) => $query->where('category', $request->string('category')->toString()))
+            ->when($categorySlugs !== [], function ($query) use ($categorySlugs): void {
+                $query->where(function ($inner) use ($categorySlugs): void {
+                    foreach ($categorySlugs as $slug) {
+                        $inner->orWhere('category', $slug)
+                            ->orWhereJsonContains('categories', $slug);
+                    }
+                });
+            })
             ->when($request->string('dress_length')->isNotEmpty(), fn ($query) => $query->where('dress_length', $request->string('dress_length')->toString()))
             ->when($request->string('occasions')->isNotEmpty(), function ($query) use ($request): void {
                 $slugs = array_values(array_filter(array_map(
@@ -56,6 +68,11 @@ class ProductController extends Controller
     public function store(StoreProductRequest $request)
     {
         $payload = Arr::except($request->validated(), ['images', 'image_urls']);
+        $payload['categories'] = array_values(array_unique($payload['categories'] ?? [$payload['category']]));
+        $payload['category'] = $payload['categories'][0] ?? $payload['category'];
+        if (array_key_exists('colors', $payload)) {
+            $payload['colors'] = array_values(array_unique($payload['colors'] ?? []));
+        }
 
         try {
             $images = $this->collectUploadedImages($request);
@@ -95,6 +112,13 @@ class ProductController extends Controller
             'remove_image_urls',
             'image_urls',
         ]);
+        if (array_key_exists('categories', $payload)) {
+            $payload['categories'] = array_values(array_unique($payload['categories'] ?? []));
+            $payload['category'] = $payload['categories'][0] ?? $payload['category'] ?? $product->category;
+        }
+        if (array_key_exists('colors', $payload)) {
+            $payload['colors'] = array_values(array_unique($payload['colors'] ?? []));
+        }
 
         $current = $product->imagesList();
         $pathsToDelete = [];
@@ -296,9 +320,16 @@ class ProductController extends Controller
             throw new \RuntimeException('S3 upload returned an invalid path.');
         }
 
+        $url = Storage::disk('s3')->url($path);
+        if (! str_starts_with($url, 'http')) {
+            $bucket = (string) config('filesystems.disks.s3.bucket');
+            $region = (string) config('filesystems.disks.s3.region', 'us-east-1');
+            $url = "https://{$bucket}.s3.{$region}.amazonaws.com/{$path}";
+        }
+
         return [
             'path' => $path,
-            'url' => Storage::disk('s3')->url($path),
+            'url' => $url,
         ];
     }
 }

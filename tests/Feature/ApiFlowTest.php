@@ -237,6 +237,7 @@ class ApiFlowTest extends TestCase
                 'quantity' => 1,
                 'status' => 'available',
                 'category' => 'Gala',
+                'categories' => ['Gala', 'Cocktail'],
                 'dress_length' => 'largo',
                 'occasions' => ['boda', 'boda_playa'],
                 'is_vintage' => true,
@@ -246,8 +247,52 @@ class ApiFlowTest extends TestCase
             ]);
 
         $create->assertCreated()
+            ->assertJsonPath('category', 'Gala')
+            ->assertJsonPath('categories.0', 'Gala')
+            ->assertJsonPath('categories.1', 'Cocktail')
             ->assertJsonPath('dress_length', 'largo')
             ->assertJsonPath('is_vintage', true)
             ->assertJsonPath('is_dr_fave', true);
+    }
+
+    public function test_admin_can_save_product_colors(): void
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $token = $admin->createToken('test')->plainTextToken;
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/products', [
+                'name' => 'Multi color dress',
+                'description' => 'Vestido con varios colores',
+                'rental_price_daily' => 1200,
+                'quantity' => 1,
+                'status' => 'available',
+                'category' => 'Gala',
+                'categories' => ['Gala'],
+                'colors' => ['#E8A0BF', '#FFFFFF'],
+                'date_added' => now()->toDateString(),
+            ])
+            ->assertCreated()
+            ->assertJsonPath('colors.0', '#E8A0BF')
+            ->assertJsonPath('colors.1', '#FFFFFF');
+    }
+
+    public function test_products_can_be_filtered_by_multiple_categories(): void
+    {
+        $match = Product::factory()->create([
+            'category' => 'Gala',
+            'categories' => ['Gala', 'Cocktail'],
+        ]);
+
+        Product::factory()->create([
+            'category' => 'Civil',
+            'categories' => ['Civil'],
+        ]);
+
+        $this->getJson('/api/v1/products?category=Cocktail')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $match->id);
     }
 }
