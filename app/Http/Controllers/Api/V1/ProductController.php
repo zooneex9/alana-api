@@ -71,7 +71,10 @@ class ProductController extends Controller
         $payload['categories'] = array_values(array_unique($payload['categories'] ?? [$payload['category']]));
         $payload['category'] = $payload['categories'][0] ?? $payload['category'];
         if (array_key_exists('colors', $payload)) {
-            $payload['colors'] = array_values(array_unique($payload['colors'] ?? []));
+            $payload['colors'] = array_values(array_unique(array_filter(
+                $payload['colors'] ?? [],
+                fn ($value) => is_string($value) && trim($value) !== ''
+            )));
         }
 
         try {
@@ -117,7 +120,10 @@ class ProductController extends Controller
             $payload['category'] = $payload['categories'][0] ?? $payload['category'] ?? $product->category;
         }
         if (array_key_exists('colors', $payload)) {
-            $payload['colors'] = array_values(array_unique($payload['colors'] ?? []));
+            $payload['colors'] = array_values(array_unique(array_filter(
+                $payload['colors'] ?? [],
+                fn ($value) => is_string($value) && trim($value) !== ''
+            )));
         }
 
         $current = $product->imagesList();

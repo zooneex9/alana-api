@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\DressColor;
 use App\Models\Product;
 use App\Models\RentalBlock;
 use App\Models\User;
@@ -260,6 +261,8 @@ class ApiFlowTest extends TestCase
         $admin = User::factory()->create();
         $admin->assignRole('admin');
         $token = $admin->createToken('test')->plainTextToken;
+        DressColor::query()->create(['name' => 'Rosa', 'hex' => '#E8A0BF']);
+        DressColor::query()->create(['name' => 'Blanco', 'hex' => '#FFFFFF']);
 
         $this->withHeader('Authorization', "Bearer {$token}")
             ->postJson('/api/v1/products', [
@@ -270,12 +273,47 @@ class ApiFlowTest extends TestCase
                 'status' => 'available',
                 'category' => 'Gala',
                 'categories' => ['Gala'],
-                'colors' => ['#E8A0BF', '#FFFFFF'],
+                'colors' => ['Rosa', 'Blanco'],
                 'date_added' => now()->toDateString(),
             ])
             ->assertCreated()
-            ->assertJsonPath('colors.0', '#E8A0BF')
-            ->assertJsonPath('colors.1', '#FFFFFF');
+            ->assertJsonPath('colors.0', 'Rosa')
+            ->assertJsonPath('colors.1', 'Blanco');
+    }
+
+    public function test_admin_can_manage_dress_colors(): void
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $token = $admin->createToken('test')->plainTextToken;
+
+        $create = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/dress-colors', [
+                'name' => 'Rosa',
+                'hex' => '#E8A0BF',
+            ]);
+
+        $create->assertCreated()
+            ->assertJsonPath('name', 'Rosa')
+            ->assertJsonPath('hex', '#E8A0BF');
+
+        $dressColorId = $create->json('id');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/dress-colors/{$dressColorId}", [
+                'name' => 'Rosa pastel',
+                'hex' => '#E8A0BF',
+            ])
+            ->assertOk()
+            ->assertJsonPath('name', 'Rosa pastel');
+
+        $this->getJson('/api/v1/dress-colors')
+            ->assertOk()
+            ->assertJsonCount(1);
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->deleteJson("/api/v1/dress-colors/{$dressColorId}")
+            ->assertNoContent();
     }
 
     public function test_products_can_be_filtered_by_multiple_categories(): void

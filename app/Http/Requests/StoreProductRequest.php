@@ -2,8 +2,8 @@
 
 namespace App\Http\Requests;
 
+use App\Models\DressColor;
 use App\Support\DressTaxonomy;
-use App\Support\ProductColors;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -64,7 +64,22 @@ class StoreProductRequest extends FormRequest
             }
         }
         if ($this->has('colors')) {
-            $this->merge(['colors' => ProductColors::normalizeList($this->input('colors'))]);
+            $colors = collect($this->input('colors'))
+                ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+                ->map(function (string $value) {
+                    $normalized = trim($value);
+                    $match = DressColor::query()
+                        ->where('name', $normalized)
+                        ->orWhere('hex', strtoupper($normalized))
+                        ->first();
+
+                    return $match?->name ?? $normalized;
+                })
+                ->unique()
+                ->values()
+                ->take(8)
+                ->all();
+            $this->merge(['colors' => $colors]);
         }
     }
 
@@ -94,8 +109,8 @@ class StoreProductRequest extends FormRequest
             'is_dr_fave' => ['nullable', 'boolean'],
             'size' => ['nullable', 'string', 'max:32'],
             'color' => ['nullable', 'string', 'max:64'],
-            'colors' => ['nullable', 'array', 'max:'.ProductColors::MAX],
-            'colors.*' => ['regex:/^#[0-9A-Fa-f]{6}$/'],
+            'colors' => ['nullable', 'array', 'max:8'],
+            'colors.*' => ['string', 'max:100', 'exists:dress_colors,name'],
             'date_added' => ['nullable', 'date'],
             'images' => ['nullable', 'array', 'max:20'],
             'images.*' => ['file', 'image', 'max:5120'],

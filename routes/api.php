@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\DressColorController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\RentalBlockController;
 use Illuminate\Support\Facades\Route;
@@ -15,6 +16,7 @@ Route::prefix('v1')->group(function (): void {
     Route::get('/products/{product}', [ProductController::class, 'show']);
     Route::get('/products/{product}/availability', [RentalBlockController::class, 'availability']);
     Route::get('/categories', [CategoryController::class, 'index']);
+    Route::get('/dress-colors', [DressColorController::class, 'index']);
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('/auth/me', [AuthController::class, 'me']);
@@ -28,6 +30,9 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/categories', [CategoryController::class, 'store']);
             Route::patch('/categories/{category}', [CategoryController::class, 'update']);
             Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
+            Route::post('/dress-colors', [DressColorController::class, 'store']);
+            Route::patch('/dress-colors/{dressColor}', [DressColorController::class, 'update']);
+            Route::delete('/dress-colors/{dressColor}', [DressColorController::class, 'destroy']);
 
             Route::get('/products/{product}/rental-history', [RentalBlockController::class, 'productHistory']);
             Route::get('/rental-blocks', [RentalBlockController::class, 'index']);
