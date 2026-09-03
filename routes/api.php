@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
-use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\DressColorController;
@@ -15,7 +14,6 @@ Route::prefix('v1')->group(function (): void {
     Route::get('/products', [ProductController::class, 'index']);
     Route::get('/products/{product}', [ProductController::class, 'show']);
     Route::get('/products/{product}/availability', [RentalBlockController::class, 'availability']);
-    Route::get('/categories', [CategoryController::class, 'index']);
     Route::get('/dress-colors', [DressColorController::class, 'index']);
 
     Route::middleware('auth:sanctum')->group(function (): void {
@@ -27,9 +25,6 @@ Route::prefix('v1')->group(function (): void {
 
             Route::apiResource('products', ProductController::class)->except(['index', 'show']);
             Route::patch('/products/{product}/status', [ProductController::class, 'updateStatus']);
-            Route::post('/categories', [CategoryController::class, 'store']);
-            Route::patch('/categories/{category}', [CategoryController::class, 'update']);
-            Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
             Route::post('/dress-colors', [DressColorController::class, 'store']);
             Route::patch('/dress-colors/{dressColor}', [DressColorController::class, 'update']);
             Route::delete('/dress-colors/{dressColor}', [DressColorController::class, 'destroy']);

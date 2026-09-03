@@ -57,6 +57,9 @@ class StoreProductRequest extends FormRequest
         if ($this->filled('category') && ! $this->has('categories')) {
             $this->merge(['categories' => [(string) $this->input('category')]]);
         }
+        if (! $this->filled('category')) {
+            $this->merge(['category' => 'General', 'categories' => ['General']]);
+        }
         if ($this->has('colors') && is_string($this->input('colors'))) {
             $decoded = json_decode($this->input('colors'), true);
             if (is_array($decoded)) {
@@ -98,7 +101,7 @@ class StoreProductRequest extends FormRequest
             'rental_duration_days' => ['nullable', 'integer', 'min:1', 'max:90'],
             'quantity' => ['required', 'integer', 'min:0'],
             'status' => ['required', 'in:available,reserved,rented'],
-            'category' => ['required', 'string', 'max:120'],
+            'category' => ['nullable', 'string', 'max:120'],
             'categories' => ['nullable', 'array', 'max:12'],
             'categories.*' => ['string', 'max:120'],
             'dress_length' => ['nullable', 'string', 'in:'.implode(',', DressTaxonomy::LENGTHS)],
