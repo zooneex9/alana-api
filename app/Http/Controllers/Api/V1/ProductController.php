@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
+use App\Models\DressOccasion;
 use App\Models\Product;
 use App\Support\DressTaxonomy;
 use Illuminate\Http\Request;
@@ -39,7 +40,10 @@ class ProductController extends Controller
                     'trim',
                     explode(',', $request->string('occasions')->toString())
                 )));
-                $allowed = array_values(array_intersect($slugs, DressTaxonomy::OCCASIONS));
+                $allowed = DressOccasion::query()
+                    ->whereIn('slug', $slugs)
+                    ->pluck('slug')
+                    ->all();
                 if ($allowed === []) {
                     return;
                 }

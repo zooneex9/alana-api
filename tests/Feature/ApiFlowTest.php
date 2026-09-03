@@ -316,6 +316,39 @@ class ApiFlowTest extends TestCase
             ->assertNoContent();
     }
 
+    public function test_admin_can_manage_dress_occasions(): void
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+        $token = $admin->createToken('test')->plainTextToken;
+
+        $create = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/dress-occasions', [
+                'name' => 'Cocktail',
+            ]);
+
+        $create->assertCreated()
+            ->assertJsonPath('name', 'Cocktail')
+            ->assertJsonPath('slug', 'cocktail');
+
+        $occasionId = $create->json('id');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/dress-occasions/{$occasionId}", [
+                'name' => 'Cocktail party',
+            ])
+            ->assertOk()
+            ->assertJsonPath('name', 'Cocktail party')
+            ->assertJsonPath('slug', 'cocktail');
+
+        $this->getJson('/api/v1/dress-occasions')
+            ->assertOk();
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->deleteJson("/api/v1/dress-occasions/{$occasionId}")
+            ->assertNoContent();
+    }
+
     public function test_products_can_be_filtered_by_multiple_categories(): void
     {
         $match = Product::factory()->create([

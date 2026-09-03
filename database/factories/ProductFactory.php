@@ -30,9 +30,10 @@ class ProductFactory extends Factory
             'status' => fake()->randomElement(['available', 'reserved', 'rented']),
             'payment_plans' => [['type' => 'full']],
             'category' => fake()->randomElement(['Gala', 'Civil', 'XV Años', 'Cocktail']),
+            'categories' => fake()->randomElements(['Gala', 'Civil', 'XV Años', 'Cocktail'], fake()->numberBetween(1, 2)),
             'dress_length' => fake()->optional()->randomElement(DressTaxonomy::LENGTHS),
             'occasions' => fake()->optional()->randomElements(
-                DressTaxonomy::OCCASIONS,
+                ['anillo_civil', 'night_out', 'boda_playa', 'boda', 'viaje_playa', 'posada'],
                 fake()->numberBetween(1, 2)
             ),
             'is_vintage' => false,
