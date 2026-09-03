@@ -12,5 +12,6 @@ class DressColor extends Model
     protected $fillable = [
         'name',
         'hex',
+        'image_url',
     ];
 }
